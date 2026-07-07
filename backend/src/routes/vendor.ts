@@ -3,8 +3,92 @@ import { z } from 'zod';
 import bcrypt from 'bcrypt';
 import { dbQuery } from '../db/pool.js';
 import { getVendorAnalytics } from '../services/analytics.js';
+import { buildLookupDiscountView } from '../services/discounts.js';
 
 export async function registerVendorRoutes(fastify: FastifyInstance): Promise<void> {
+  fastify.get('/api/vendor/cards', { preHandler: fastify.requireRole(['vendor']) }, async (request) => {
+    const vendorId = request.user!.sub;
+    const query = await dbQuery<{
+      id: string;
+      name: string;
+      theme: string;
+      description: string | null;
+      image_url: string | null;
+      expiration_date: string | null;
+      max_uses: number | null;
+      status: string;
+      discount_id: string | null;
+      discount_type: 'fixed' | 'percent' | 'bogo' | null;
+      discount_value: string | null;
+      min_purchase: string | null;
+      max_uses_total: number | null;
+      max_uses_per_customer: number | null;
+      uses_count: number | null;
+      city_overrides: Record<string, { type?: 'fixed' | 'percent' | 'bogo'; value?: number }> | null;
+      active: boolean | null;
+    }>(
+      `
+        SELECT c.id,
+               c.name,
+               c.theme,
+               c.description,
+               c.image_url,
+               c.expiration_date,
+               c.max_uses,
+               c.status,
+               d.id AS discount_id,
+               d.type AS discount_type,
+               d.value AS discount_value,
+               d.min_purchase,
+               d.max_uses_total,
+               d.max_uses_per_customer,
+               d.uses_count,
+               d.city_overrides,
+               d.active
+        FROM card_vendors cv
+        JOIN cards c ON c.id = cv.card_id
+        LEFT JOIN discounts d ON d.card_id = cv.card_id AND d.vendor_id = cv.vendor_id
+        WHERE cv.vendor_id = $1
+        ORDER BY c.created_at DESC
+      `,
+      [vendorId],
+    );
+
+    return query.map((card) => {
+      const discount =
+        card.discount_id && card.discount_type && card.discount_value !== null && card.min_purchase !== null
+          ? buildLookupDiscountView(
+              {
+                id: card.discount_id,
+                cardId: card.id,
+                vendorId,
+                type: card.discount_type,
+                value: card.discount_value,
+                minPurchase: card.min_purchase,
+                maxUsesTotal: card.max_uses_total,
+                maxUsesPerCustomer: card.max_uses_per_customer,
+                usesCount: card.uses_count ?? 0,
+                cityOverrides: card.city_overrides,
+                active: Boolean(card.active),
+              },
+              null,
+            )
+          : null;
+
+      return {
+        id: card.id,
+        name: card.name,
+        theme: card.theme,
+        description: card.description,
+        image_url: card.image_url,
+        expiration_date: card.expiration_date,
+        max_uses: card.max_uses,
+        status: card.status,
+        discount,
+      };
+    });
+  });
+
   fastify.post('/api/vendor/register', async (request, reply) => {
     const schema = z.object({
       name: z.string().min(1),
