@@ -3,6 +3,7 @@ import { z } from 'zod';
 import bcrypt from 'bcrypt';
 import { dbQuery } from '../db/pool.js';
 import { getAdminAnalytics } from '../services/analytics.js';
+import { buildLookupDiscountView } from '../services/discounts.js';
 import { generateTempPassword } from '../utils/ids.js';
 import { writeTransactionAudit } from '../services/audit.js';
 
@@ -40,6 +41,23 @@ const discountSchema = z.object({
 });
 
 export async function registerAdminRoutes(fastify: FastifyInstance): Promise<void> {
+  fastify.get('/api/admin/cards', { preHandler: fastify.requireRole(['admin']) }, async (request) => {
+    const query = request.query as { theme?: string; status?: string };
+    return loadCardsWithBusinesses({
+      ...(query.theme ? { theme: query.theme } : {}),
+      ...(query.status ? { status: query.status } : {}),
+    });
+  });
+
+  fastify.get('/api/admin/cards/:id', { preHandler: fastify.requireRole(['admin']) }, async (request, reply) => {
+    const id = (request.params as { id: string }).id;
+    const cards = await loadCardsWithBusinesses({ id });
+    if (cards.length === 0) {
+      return reply.code(404).send({ error: 'Card not found' });
+    }
+    return cards[0];
+  });
+
   fastify.get('/api/admin/analytics', { preHandler: fastify.requireRole(['admin']) }, async (request) => {
     const query = request.query as { from?: string; to?: string; city?: string };
     return getAdminAnalytics({
@@ -255,5 +273,105 @@ export async function registerAdminRoutes(fastify: FastifyInstance): Promise<voi
   fastify.delete('/api/admin/discounts/:id', { preHandler: fastify.requireRole(['admin']) }, async (request) => {
     const id = (request.params as { id: string }).id;
     return dbQuery('DELETE FROM discounts WHERE id = $1 RETURNING id', [id]);
+  });
+}
+
+async function loadCardsWithBusinesses(filters: { id?: string; theme?: string; status?: string }) {
+  const cards = await dbQuery<{
+    id: string;
+    name: string;
+    theme: string;
+    description: string | null;
+    image_url: string | null;
+    expiration_date: string | null;
+    max_uses: number | null;
+    status: string;
+  }>(
+    `
+      SELECT *
+      FROM cards
+      WHERE ($1::uuid IS NULL OR id = $1::uuid)
+        AND ($2::text IS NULL OR $2 = '' OR theme = $2)
+        AND ($3::text IS NULL OR $3 = '' OR status = $3)
+      ORDER BY created_at DESC
+    `,
+    [filters.id ?? null, filters.theme ?? null, filters.status ?? null],
+  );
+
+  const cardIds = cards.map((card) => card.id);
+  const vendors = cardIds.length
+    ? await dbQuery<{
+        card_id: string;
+        vendor_id: string;
+        vendor_name: string;
+        vendor_city: string | null;
+        discount_id: string | null;
+        discount_type: 'fixed' | 'percent' | 'bogo' | null;
+        discount_value: string | null;
+        min_purchase: string | null;
+        max_uses_total: number | null;
+        max_uses_per_customer: number | null;
+        uses_count: number | null;
+        city_overrides: Record<string, { type?: 'fixed' | 'percent' | 'bogo'; value?: number }> | null;
+        active: boolean | null;
+      }>(
+        `
+          SELECT cv.card_id,
+                 v.id AS vendor_id,
+                 v.name AS vendor_name,
+                 v.city AS vendor_city,
+                 d.id AS discount_id,
+                 d.type AS discount_type,
+                 d.value AS discount_value,
+                 d.min_purchase,
+                 d.max_uses_total,
+                 d.max_uses_per_customer,
+                 d.uses_count,
+                 d.city_overrides,
+                 d.active
+          FROM card_vendors cv
+          JOIN vendors v ON v.id = cv.vendor_id
+          LEFT JOIN discounts d ON d.card_id = cv.card_id AND d.vendor_id = cv.vendor_id
+          WHERE cv.card_id = ANY($1::uuid[])
+          ORDER BY v.name
+        `,
+        [cardIds],
+      )
+    : [];
+
+  return cards.map((card) => {
+    const participating = vendors.filter((vendor) => vendor.card_id === card.id).map((vendor) => {
+      const discount =
+        vendor.discount_id && vendor.discount_type && vendor.discount_value !== null && vendor.min_purchase !== null
+          ? buildLookupDiscountView(
+              {
+                id: vendor.discount_id,
+                cardId: card.id,
+                vendorId: vendor.vendor_id,
+                type: vendor.discount_type,
+                value: vendor.discount_value,
+                minPurchase: vendor.min_purchase,
+                maxUsesTotal: vendor.max_uses_total,
+                maxUsesPerCustomer: vendor.max_uses_per_customer,
+                usesCount: vendor.uses_count ?? 0,
+                cityOverrides: vendor.city_overrides,
+                active: Boolean(vendor.active),
+              },
+              null,
+            )
+          : null;
+
+      return {
+        id: vendor.vendor_id,
+        name: vendor.vendor_name,
+        city: vendor.vendor_city,
+        discount,
+      };
+    });
+
+    return {
+      ...card,
+      participatingBusinesses: participating,
+    };
   });
 }
