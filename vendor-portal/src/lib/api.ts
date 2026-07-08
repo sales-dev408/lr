@@ -1,4 +1,16 @@
-import type { AuthResponse, LookupResponse, RedeemResponse, VendorAnalyticsResponse, VendorCard, VendorDiscount, VendorProfile } from './types';
+import type {
+  AuthResponse,
+  LookupResponse,
+  PosConnectResponse,
+  PosConnectionView,
+  PosProvider,
+  PosSyncResponse,
+  RedeemResponse,
+  VendorAnalyticsResponse,
+  VendorCard,
+  VendorDiscount,
+  VendorProfile,
+} from './types';
 
 const STORAGE_KEY = 'lr.vendor.auth';
 
@@ -191,6 +203,22 @@ export async function updateVendorDiscount(id: string, body: {
 export async function getVendorAnalytics(period?: string): Promise<VendorAnalyticsResponse> {
   const response = await apiRequest<VendorAnalyticsResponse>(`/vendor/analytics${buildQuery({ period })}`);
   return response;
+}
+
+export async function getPosConnections(): Promise<PosConnectionView[]> {
+  return apiRequest('/vendor/pos/connections');
+}
+
+export async function connectPosProvider(provider: PosProvider): Promise<PosConnectResponse> {
+  return apiRequest(`/vendor/pos/connections/${provider}/connect`, { method: 'POST' });
+}
+
+export async function disconnectPosProvider(provider: PosProvider): Promise<PosConnectionView> {
+  return apiRequest(`/vendor/pos/connections/${provider}`, { method: 'DELETE' });
+}
+
+export async function syncPosProvider(provider: PosProvider): Promise<PosSyncResponse> {
+  return apiRequest(`/vendor/pos/connections/${provider}/sync`, { method: 'POST' });
 }
 
 export async function lookupByToken(lookupToken: string, vendorId?: string, city?: string): Promise<LookupResponse> {

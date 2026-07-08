@@ -21,6 +21,7 @@ export function AppLayout() {
               My cards
             </NavLink>
             <NavLink to="/analytics">Analytics</NavLink>
+            <NavLink to="/pos-integration">POS integration</NavLink>
             <NavLink to="/redeem">Redeem</NavLink>
             <NavLink to="/pos-instructions">POS instructions</NavLink>
           </nav>

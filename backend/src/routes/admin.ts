@@ -6,6 +6,7 @@ import { getAdminAnalytics } from '../services/analytics.js';
 import { buildLookupDiscountView } from '../services/discounts.js';
 import { generateTempPassword } from '../utils/ids.js';
 import { writeTransactionAudit } from '../services/audit.js';
+import { deleteDiscountFromVendorConnections, syncDiscountToVendorConnections } from '../services/pos.js';
 
 const cardSchema = z.object({
   name: z.string().min(1),
@@ -232,6 +233,9 @@ export async function registerAdminRoutes(fastify: FastifyInstance): Promise<voi
         body.active,
       ],
     );
+    void syncDiscountToVendorConnections({ discountId: rows[0]!.id, action: 'upsert' }).catch((error) => {
+      fastify.log.warn({ error, discountId: rows[0]!.id }, 'POS auto-sync failed');
+    });
     return reply.code(201).send({ id: rows[0]!.id });
   });
 
@@ -267,11 +271,17 @@ export async function registerAdminRoutes(fastify: FastifyInstance): Promise<voi
         body.active ?? null,
       ],
     );
+    void syncDiscountToVendorConnections({ discountId: id, action: 'upsert' }).catch((error) => {
+      fastify.log.warn({ error, discountId: id }, 'POS auto-sync failed');
+    });
     return rows[0] ?? {};
   });
 
   fastify.delete('/api/admin/discounts/:id', { preHandler: fastify.requireRole(['admin']) }, async (request) => {
     const id = (request.params as { id: string }).id;
+    void deleteDiscountFromVendorConnections({ discountId: id }).catch((error) => {
+      fastify.log.warn({ error, discountId: id }, 'POS auto-sync failed');
+    });
     return dbQuery('DELETE FROM discounts WHERE id = $1 RETURNING id', [id]);
   });
 }

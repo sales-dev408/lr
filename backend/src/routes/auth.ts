@@ -25,9 +25,12 @@ const customerLoginSchema = z.object({
 
 const socialSchema = z.object({
   provider: z.string().min(1),
-  token: z.string().min(1),
+  token: z.string().min(1).optional(),
+  idToken: z.string().min(1).optional(),
   email: z.string().email().optional(),
   fullName: z.string().min(1).default('Social User'),
+}).refine((value) => Boolean(value.token || value.idToken), {
+  message: 'token or idToken is required',
 });
 
 const vendorLoginSchema = z.object({
@@ -130,7 +133,8 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
 
   fastify.post('/api/auth/social', async (request, reply) => {
     const body = socialSchema.parse(request.body);
-    const socialId = `${body.provider}:${body.token}`;
+    const socialToken = body.token ?? body.idToken ?? '';
+    const socialId = `${body.provider}:${socialToken}`;
     const rows = await withDbClient(async (client) => {
       await client.query('BEGIN');
       try {

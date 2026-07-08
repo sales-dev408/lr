@@ -4,6 +4,7 @@ import bcrypt from 'bcrypt';
 import { dbQuery } from '../db/pool.js';
 import { getVendorAnalytics } from '../services/analytics.js';
 import { buildLookupDiscountView } from '../services/discounts.js';
+import { syncDiscountToVendorConnections } from '../services/pos.js';
 
 export async function registerVendorRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get('/api/vendor/cards', { preHandler: fastify.requireRole(['vendor']) }, async (request) => {
@@ -153,6 +154,9 @@ export async function registerVendorRoutes(fastify: FastifyInstance): Promise<vo
         body.cityOverrides ? JSON.stringify(body.cityOverrides) : null,
       ],
     );
+    void syncDiscountToVendorConnections({ discountId: id, action: 'upsert' }).catch((error) => {
+      fastify.log.warn({ error, discountId: id }, 'POS auto-sync failed');
+    });
 
     return rows[0] ?? {};
   });

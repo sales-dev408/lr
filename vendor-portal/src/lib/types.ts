@@ -1,6 +1,9 @@
 export type VendorRole = 'vendor';
 export type DiscountType = 'fixed' | 'percent' | 'bogo';
 export type CardTheme = 'sports' | 'entertainment' | 'shops_restaurants';
+export type PosProvider = 'square' | 'clover' | 'toast' | 'stripe';
+export type PosConnectionStatus = 'pending' | 'connected' | 'error' | 'disconnected';
+export type PosIntegrationMode = 'real' | 'simulated';
 
 export interface VendorProfile {
   id: string;
@@ -51,6 +54,48 @@ export interface VendorAnalyticsResponse {
   };
   daily: Array<{ day: string; redemptions: number }>;
   byCard: Array<{ cardId: string; cardName: string; redemptions: number; uniqueCustomers: number }>;
+}
+
+export interface PosConnectionView {
+  id: string;
+  provider: PosProvider;
+  mode: PosIntegrationMode;
+  status: PosConnectionStatus;
+  merchantId: string | null;
+  locationId: string | null;
+  scope: string | null;
+  tokenExpiresAt: string | null;
+  lastSyncedAt: string | null;
+  lastErrorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+  latestSyncStatus: 'success' | 'error' | null;
+  latestSyncMessage: string | null;
+  latestSyncAt: string | null;
+}
+
+export interface PosConnectResponse {
+  provider: PosProvider;
+  mode: PosIntegrationMode;
+  status: PosConnectionStatus;
+  connection: PosConnectionView;
+  message: string;
+  authorizeUrl?: string | null;
+  state?: string | null;
+}
+
+export interface PosSyncResponse {
+  provider: PosProvider;
+  synced: number;
+  status: PosConnectionStatus;
+  results: Array<{
+    connectionId: string;
+    provider: PosProvider;
+    action: 'upsert' | 'delete';
+    status: 'success' | 'error';
+    message: string | null;
+    externalDiscountId: string | null;
+  }>;
 }
 
 export interface LookupResponse {

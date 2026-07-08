@@ -4,3 +4,5 @@ dist
 *.log
 coverage
 .expo
+*.tsbuildinfo
+local-postgres/

@@ -5,6 +5,7 @@ import { AnalyticsPage } from './pages/AnalyticsPage';
 import { CardsPage } from './pages/CardsPage';
 import { DiscountEditPage } from './pages/DiscountEditPage';
 import { LoginPage } from './pages/LoginPage';
+import { PosIntegrationPage } from './pages/PosIntegrationPage';
 import { PosInstructionsPage } from './pages/PosInstructionsPage';
 import { RedeemPage } from './pages/RedeemPage';
 import { RegisterPage } from './pages/RegisterPage';
@@ -22,6 +23,7 @@ export function App() {
         }
       >
         <Route path="/" element={<CardsPage />} />
+        <Route path="/pos-integration" element={<PosIntegrationPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/redeem" element={<RedeemPage />} />
         <Route path="/pos-instructions" element={<PosInstructionsPage />} />
