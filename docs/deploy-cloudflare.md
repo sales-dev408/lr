@@ -14,8 +14,9 @@ Cloudflare DNS/CDN/WAF in front of the backend (api.yourdomain.com, proxied)
 ## 1) Frontends — Cloudflare Workers Static Assets (two projects)
 
 Each app ships a `wrangler.jsonc` that serves `./dist` with SPA fallback
-(`not_found_handling: single-page-application`). There is also a
-`public/_redirects` (`/* /index.html 200`) so the classic Pages preset works too.
+(`not_found_handling: single-page-application`). That handles deep-link routing —
+do **not** add a `_redirects` file with a `/* /index.html 200` rule alongside it;
+Workers Static Assets rejects that as an infinite-loop redirect and the deploy fails.
 
 Create **two** projects (they cannot share one — each needs its own root dir):
 
@@ -60,5 +61,6 @@ the same backend URL.
 
 ## Common gotchas
 - **CORS:** backend origins must include both Cloudflare frontend URLs.
-- **SPA 404s:** keep `wrangler.jsonc` SPA fallback or the `_redirects` file.
+- **SPA 404s:** handled by the `wrangler.jsonc` SPA fallback; don't add a `/* /index.html` `_redirects` rule (Workers rejects it as an infinite loop).
+- **Worker name:** `wrangler.jsonc` uses `lr-admin-dashboard` / `lr-vendor-portal`. Name your Cloudflare Workers/Pages projects to match, or connected builds will warn and try to open a rename PR.
 - **Stale API URL:** `VITE_API_BASE_URL` is build-time — redeploy after changing it.
