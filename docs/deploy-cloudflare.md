@@ -5,10 +5,10 @@ PostgreSQL run elsewhere (Cloudflare has no Postgres, and Workers can't run
 Fastify + `pg` unchanged); put Cloudflare in front of them for DNS/TLS/WAF.
 
 ```
-Cloudflare Workers (Static Assets)          Railway / Render / Fly        Neon / Supabase
-  ├─ lr-admin-dashboard  (SPA)  ── /api ──▶  backend (Fastify)  ── TLS ──▶  PostgreSQL
-  └─ lr-vendor-portal    (SPA)               (DATABASE_URL, CORS)
-Cloudflare DNS/CDN/WAF in front of the backend (api.yourdomain.com, proxied)
+Cloudflare Workers (Static Assets)          Supabase Edge Functions        Supabase Postgres
+  ├─ lr-admin-dashboard  (SPA)  ── /api ──▶  router function  ── HTTP ──▶  database
+  └─ lr-vendor-portal    (SPA)               (preserves /api/*)
+Cloudflare DNS/CDN/WAF in front of the frontends (optional for the API too)
 ```
 
 ## 1) Frontends — Cloudflare Workers Static Assets (two projects)
@@ -38,16 +38,21 @@ cd admin-dashboard && npm install && npm run build && npx wrangler deploy
 cd ../vendor-portal && npm install && npm run build && npx wrangler deploy
 ```
 
-## 2) Backend — Railway / Render / Fly (not Cloudflare)
+## 2) Backend — Supabase Edge Functions
 
-Deploy `backend/`: build `npm run build`, start `npm start`, run `npm run migrate`
-on release. Required env: `DATABASE_URL` (with `PGSSLMODE=require`), `JWT_SECRET`,
-`VENDOR_PORTAL_URL`, POS/Square keys, and **CORS allowed origins set to the two
-Cloudflare frontend URLs** (otherwise logins fail with CORS errors).
+Deploy a single Edge Function named `router` and keep the existing `/api/*`
+contract. Required env: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET`,
+`VENDOR_PORTAL_URL`, `ADMIN_DASHBOARD_URL`, POS/Square keys, and any other
+provider secrets you use.
 
-Front it with Cloudflare: add your domain, create a proxied (orange-cloud) `api`
-DNS record → the backend host. Optionally use **Cloudflare Hyperdrive** to pool
-the external Postgres connection.
+Frontend requests should point at:
+
+```text
+https://<project>.supabase.co/functions/v1/router
+```
+
+That keeps calls like `/api/auth/login` and `/api/admin/cards` intact while
+moving the actual backend runtime into Supabase.
 
 ## 3) Database — managed Postgres
 
@@ -60,7 +65,7 @@ Build via Expo EAS → App Store / Play Store; point `EXPO_PUBLIC_API_BASE_URL` 
 the same backend URL.
 
 ## Common gotchas
-- **CORS:** backend origins must include both Cloudflare frontend URLs.
+- **CORS:** the Edge Function must allow both Cloudflare frontend URLs.
 - **SPA 404s:** handled by the `wrangler.jsonc` SPA fallback; don't add a `/* /index.html` `_redirects` rule (Workers rejects it as an infinite loop).
 - **Worker name:** `wrangler.jsonc` uses `lr-admin-dashboard` / `lr-vendor-portal`. Name your Cloudflare Workers/Pages projects to match, or connected builds will warn and try to open a rename PR.
 - **Stale API URL:** `VITE_API_BASE_URL` is build-time — redeploy after changing it.

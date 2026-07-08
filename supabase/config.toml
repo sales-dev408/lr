@@ -1,0 +1,4 @@
+project_id = "lr"
+
+[functions.router]
+verify_jwt = false
