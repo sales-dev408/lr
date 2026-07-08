@@ -25,7 +25,7 @@ platform owner administers everything.
                                                  │  REST/JSON over TLS
                                                  ▼
         ┌────────────────────────────────────────────────────────────────┐
-        │                     NODE.JS BACKEND (Fastify)                    │
+        │                 SUPABASE EDGE FUNCTIONS                          │
         │                                                                  │
         │  Security edge:  helmet · CORS · rate-limit · bad-traffic block  │
         │                  · CAPTCHA verify · audit logging                │

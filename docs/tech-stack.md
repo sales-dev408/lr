@@ -2,17 +2,17 @@
 
 | Layer | Choice | Why |
 |---|---|---|
-| **Backend runtime** | Node.js 20 (LTS) | Requirement; broad ecosystem. |
-| **Web framework** | Fastify v4 (TypeScript) | Fast, schema-first, first-class plugins for security/rate-limit. (Express is an acceptable alternative.) |
-| **Database** | PostgreSQL 15+ | Requirement; strong transactional guarantees, `FOR UPDATE` row locks, `jsonb`, `citext`. |
-| **DB access** | `pg` (node-postgres) + raw SQL migrations | Explicit control over locking/transactions; no ORM magic on the critical redemption path. |
+| **Backend runtime** | Supabase Edge Functions (Deno) | Keeps the backend and database on Supabase while preserving the HTTP API contract. |
+| **Web framework** | Route dispatcher in Edge Function | Minimal routing layer; the current `/api/*` contract stays intact. |
+| **Database** | Supabase Postgres | Managed PostgreSQL with transactional guarantees, `jsonb`, `citext`. |
+| **DB access** | Supabase client / RPC | HTTP-only access from Edge Functions; use RPCs for transactional flows. |
 | **Validation** | Zod | Runtime request validation + inferred TS types. |
-| **Auth** | JWT (`jsonwebtoken`) + bcrypt | Stateless, horizontally scalable. No MFA (by spec). |
-| **Security** | `@fastify/helmet`, `@fastify/cors`, `@fastify/rate-limit`, provider-agnostic CAPTCHA | Edge hardening + anti-bot. |
+| **Auth** | JWT + bcrypt-compatible hashing | Stateless, horizontally scalable. No MFA (by spec). |
+| **Security** | Supabase auth/session checks + provider-agnostic CAPTCHA | Edge hardening + anti-bot. |
 | **QR** | `qrcode` | PNG generation for onboarding + pass barcodes. |
 | **Apple Wallet** | PassKit `.pkpass` (cert-signed) + APNs | Native wallet + push updates. Signing/push guarded behind configured certs. |
 | **Google Wallet** | Google Wallet API generic pass (JWT save links via `google-auth-library`) | Android wallet. |
-| **Logging** | pino (Fastify default) | Structured logs. |
+| **Logging** | Supabase function logs | Structured logs. |
 | **Admin dashboard** | React + Vite + TypeScript | Fast SPA build; role-based UI. |
 | **Vendor portal** | React + Vite + TypeScript | Shares patterns/components with admin. |
 | **Mobile app** | Expo (React Native) + TypeScript | Single codebase for iOS + Android; wallet + camera/NFC modules; requirement allows RN or Flutter. |
@@ -32,7 +32,7 @@
 ## Repository layout
 ```
 lr/
-  backend/          Fastify + PostgreSQL API (deepest component)
+  backend/          Legacy Fastify reference; deployment target is Supabase
   admin-dashboard/  React + Vite (platform owner)
   vendor-portal/    React + Vite (vendors)
   mobile/           Expo React Native (customers, iOS + Android)
