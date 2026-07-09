@@ -265,7 +265,18 @@ function notFound(request: Request): Response {
 
 Deno.serve(async (request) => {
   const url = new URL(request.url);
-  const path = url.pathname;
+
+  // Default route = the actual request path
+  let path = url.pathname;
+
+  // Compatibility: support callers hitting:
+  //   /functions/v1/router/auth/admin/login
+  // by rewriting to your internal routes:
+  //   /api/auth/admin/login
+  const m = path.match(/^\/functions\/v1\/router\/(.+)$/);
+  if (m) {
+    path = `/api/${m[1]}`;
+  }
 
   if (request.method === 'OPTIONS') {
     return new Response(null, {
