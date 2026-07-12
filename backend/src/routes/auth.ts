@@ -2,9 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import bcrypt from 'bcrypt';
 import { dbQuery, withDbClient } from '../db/pool.js';
-import { verifyCaptcha } from '../services/captcha.js';
+
 import { signJwt } from '../services/jwt.js';
-import type { AdminProfile, UserProfile, VendorProfile } from '../types.js';
+import type { AdminProfile, UserProfile } from '../types.js';
 
 const customerRegisterSchema = z.object({
   email: z.string().email().optional(),
@@ -13,14 +13,12 @@ const customerRegisterSchema = z.object({
   fullName: z.string().min(1).default('Customer'),
   socialProvider: z.string().min(1).optional(),
   socialId: z.string().min(1).optional(),
-  captchaToken: z.string().optional(),
 });
 
 const customerLoginSchema = z.object({
   email: z.string().email().optional(),
   phone: z.string().min(7).optional(),
   password: z.string().min(1),
-  captchaToken: z.string().optional(),
 });
 
 const socialSchema = z.object({
@@ -33,16 +31,9 @@ const socialSchema = z.object({
   message: 'token or idToken is required',
 });
 
-const vendorLoginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
-  captchaToken: z.string().optional(),
-});
-
 const adminLoginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
-  captchaToken: z.string().optional(),
 });
 
 async function buildCustomerProfile(userId: string): Promise<UserProfile | null> {
@@ -60,9 +51,6 @@ async function issueProfileToken(role: 'customer' | 'vendor' | 'admin', id: stri
 export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post('/api/auth/register', async (request, reply) => {
     const body = customerRegisterSchema.parse(request.body);
-    if (!(await verifyCaptcha(body.captchaToken))) {
-      return reply.code(400).send({ error: 'CAPTCHA failed' });
-    }
 
     if (!body.email && !body.phone && !body.socialProvider) {
       return reply.code(400).send({ error: 'Email, phone, or social login is required' });
@@ -95,9 +83,6 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
 
   fastify.post('/api/auth/login', async (request, reply) => {
     const body = customerLoginSchema.parse(request.body);
-    if (!(await verifyCaptcha(body.captchaToken))) {
-      return reply.code(400).send({ error: 'CAPTCHA failed' });
-    }
 
     const rows = await dbQuery<{
       id: string;
@@ -168,58 +153,17 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
     return reply.send({ token, expiresIn: '7d', profile });
   });
 
-  fastify.post('/api/auth/vendor/login', async (request, reply) => {
-    const body = vendorLoginSchema.parse(request.body);
-    if (!(await verifyCaptcha(body.captchaToken))) {
-      return reply.code(400).send({ error: 'CAPTCHA failed' });
-    }
-
-    const rows = await dbQuery<{
-      id: string;
-      email: string;
-      password_hash: string;
-      status: string;
-      name: string;
-      location: string | null;
-      city: string | null;
-      category: string | null;
-      pos_type: string;
-    }>(
-      'SELECT * FROM vendors WHERE email::text = $1 LIMIT 1',
-      [body.email],
-    );
-
-    const vendor = rows[0];
-    if (!vendor || !(await bcrypt.compare(body.password, vendor.password_hash))) {
-      return reply.code(401).send({ error: 'Invalid credentials' });
-    }
-
-    const token = await issueProfileToken('vendor', vendor.id, vendor.email);
-    const profile: VendorProfile = {
-      id: vendor.id,
-      email: vendor.email,
-      name: vendor.name,
-      location: vendor.location,
-      city: vendor.city,
-      category: vendor.category,
-      posType: vendor.pos_type as VendorProfile['posType'],
-      status: vendor.status as VendorProfile['status'],
-    };
-    return reply.send({ token, expiresIn: '7d', profile });
-  });
-
   fastify.post('/api/auth/admin/login', async (request, reply) => {
     const body = adminLoginSchema.parse(request.body);
-    if (!(await verifyCaptcha(body.captchaToken))) {
-      return reply.code(400).send({ error: 'CAPTCHA failed' });
-    }
 
     const rows = await dbQuery<{
       id: string;
       email: string;
       password_hash: string;
       role: string;
-    }>('SELECT id, email::text AS email, password_hash, role FROM admins WHERE email::text = $1 LIMIT 1', [body.email]);
+      full_name: string | null;
+      location: string | null;
+    }>('SELECT id, email::text AS email, password_hash, role, full_name, location FROM admins WHERE email::text = $1 LIMIT 1', [body.email]);
 
     const admin = rows[0];
     if (!admin || !(await bcrypt.compare(body.password, admin.password_hash))) {
@@ -227,7 +171,13 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
     }
 
     const token = await issueProfileToken('admin', admin.id, admin.email);
-    const profile: AdminProfile = { id: admin.id, email: admin.email, role: admin.role as AdminProfile['role'] };
+    const profile: AdminProfile = {
+      id: admin.id,
+      email: admin.email,
+      role: admin.role as AdminProfile['role'],
+      fullName: admin.full_name,
+      location: admin.location,
+    };
     return reply.send({ token, expiresIn: '7d', profile });
   });
 }

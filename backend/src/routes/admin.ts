@@ -1,12 +1,11 @@
 import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
 import bcrypt from 'bcrypt';
+import { z } from 'zod';
 import { dbQuery } from '../db/pool.js';
 import { getAdminAnalytics } from '../services/analytics.js';
 import { buildLookupDiscountView } from '../services/discounts.js';
-import { generateTempPassword } from '../utils/ids.js';
 import { writeTransactionAudit } from '../services/audit.js';
-import { deleteDiscountFromVendorConnections, syncDiscountToVendorConnections } from '../services/pos.js';
+import { getOrCreateVendorPass, getVendorPassById } from '../services/vendorPass.js';
 
 const cardSchema = z.object({
   name: z.string().min(1),
@@ -20,13 +19,22 @@ const cardSchema = z.object({
 
 const vendorSchema = z.object({
   name: z.string().min(1),
-  location: z.string().optional(),
-  city: z.string().optional(),
-  category: z.string().optional(),
-  posType: z.enum(['square', 'stripe', 'clover', 'toast', 'other']),
-  email: z.string().email(),
-  password: z.string().min(8).optional(),
+  location: z.string().min(1),
+  category: z.enum(['Sports', 'Dining', 'Entertainment']),
+  posType: z.string().min(1),
+  discountType: z.enum(['fixed', 'percent']),
+  discountAmount: z.number().positive(),
+  iconPng: z.string().optional(),
+  logoPng: z.string().optional(),
   status: z.enum(['pending', 'approved', 'rejected', 'suspended']).optional(),
+});
+
+const vendorUpdateSchema = vendorSchema.partial().pick({
+  name: true,
+  location: true,
+  category: true,
+  posType: true,
+  status: true,
 });
 
 const discountSchema = z.object({
@@ -39,6 +47,13 @@ const discountSchema = z.object({
   maxUsesPerCustomer: z.number().int().positive().optional(),
   cityOverrides: z.record(z.object({ type: z.enum(['fixed', 'percent', 'bogo']).optional(), value: z.number().optional() })).default({}),
   active: z.boolean().default(true),
+});
+
+const adminSettingsSchema = z.object({
+  email: z.string().email().optional(),
+  fullName: z.string().optional(),
+  location: z.string().optional(),
+  password: z.string().min(8).optional(),
 });
 
 export async function registerAdminRoutes(fastify: FastifyInstance): Promise<void> {
@@ -68,66 +83,144 @@ export async function registerAdminRoutes(fastify: FastifyInstance): Promise<voi
     });
   });
 
+  fastify.get('/api/admin/me', { preHandler: fastify.requireRole(['admin']) }, async (request) => {
+    const id = request.user!.sub;
+    const rows = await dbQuery<{ id: string; email: string; role: string; full_name: string | null; location: string | null }>(
+      'SELECT id, email::text AS email, role, full_name, location FROM admins WHERE id = $1 LIMIT 1',
+      [id],
+    );
+    const admin = rows[0];
+    if (!admin) {
+      return { id, email: '', role: 'admin', fullName: null, location: null };
+    }
+    return { id: admin.id, email: admin.email, role: admin.role, fullName: admin.full_name, location: admin.location };
+  });
+
+  fastify.patch('/api/admin/me', { preHandler: fastify.requireRole(['admin']) }, async (request, reply) => {
+    const id = request.user!.sub;
+    const body = adminSettingsSchema.parse(request.body);
+    const updates: string[] = [];
+    const values: unknown[] = [];
+    let paramIndex = 1;
+
+    if (body.email !== undefined) {
+      updates.push(`email = $${paramIndex++}`);
+      values.push(body.email);
+    }
+    if (body.fullName !== undefined) {
+      updates.push(`full_name = $${paramIndex++}`);
+      values.push(body.fullName);
+    }
+    if (body.location !== undefined) {
+      updates.push(`location = $${paramIndex++}`);
+      values.push(body.location);
+    }
+    if (body.password !== undefined) {
+      updates.push(`password_hash = $${paramIndex++}`);
+      values.push(await bcrypt.hash(body.password, 10));
+    }
+
+    if (updates.length === 0) {
+      return reply.code(400).send({ error: 'No fields to update' });
+    }
+
+    values.push(id);
+    const rows = await dbQuery(
+      `UPDATE admins SET ${updates.join(', ')}, updated_at = now() WHERE id = $${paramIndex} RETURNING id, email::text AS email, role, full_name, location`,
+      values,
+    );
+    const admin = rows[0];
+    return admin ?? {};
+  });
+
   fastify.get('/api/admin/vendors', { preHandler: fastify.requireRole(['admin']) }, async (request) => {
-    const query = request.query as { status?: string; city?: string; category?: string };
+    const query = request.query as { status?: string; category?: string };
     const rows = await dbQuery(
       `
-        SELECT *
-        FROM vendors
-        WHERE ($1::text IS NULL OR status = $1)
-          AND ($2::text IS NULL OR city = $2)
-          AND ($3::text IS NULL OR category = $3)
-        ORDER BY created_at DESC
+        SELECT v.*, vp.discount_code, vp.pkpass_base64 IS NOT NULL AS has_pass
+        FROM vendors v
+        LEFT JOIN vendor_passes vp ON vp.id = v.vendor_pass_id
+        WHERE ($1::text IS NULL OR v.status = $1)
+          AND ($2::text IS NULL OR v.category = $2)
+        ORDER BY v.created_at DESC
       `,
-      [query.status ?? null, query.city ?? null, query.category ?? null],
+      [query.status ?? null, query.category ?? null],
     );
     return rows;
   });
 
   fastify.post('/api/admin/vendors', { preHandler: fastify.requireRole(['admin']) }, async (request, reply) => {
     const body = vendorSchema.parse(request.body);
-    const password = body.password ?? generateTempPassword();
-    const hash = await bcrypt.hash(password, 10);
+    const pass = await getOrCreateVendorPass({
+      name: body.name,
+      location: body.location,
+      discountType: body.discountType,
+      discountAmount: body.discountAmount,
+      iconPng: body.iconPng,
+      logoPng: body.logoPng,
+    });
+
     const rows = await dbQuery<{ id: string }>(
       `
-        INSERT INTO vendors (name, location, city, category, pos_type, email, password_hash, status)
+        INSERT INTO vendors (name, location, category, pos_type, discount_type, discount_amount, status, vendor_pass_id)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING id
       `,
-      [body.name, body.location ?? null, body.city ?? null, body.category ?? null, body.posType, body.email, hash, body.status ?? 'pending'],
+      [body.name, body.location, body.category, body.posType, body.discountType, body.discountAmount, body.status ?? 'approved', pass.vendorPassId],
     );
+
     await writeTransactionAudit({
       actorType: 'admin',
       actorId: request.user?.sub ?? null,
       action: 'admin.vendor.create',
       entityType: 'vendor',
       entityId: rows[0]!.id,
-      metadata: { name: body.name, email: body.email },
+      metadata: { name: body.name, discountCode: pass.discountCode },
       ip: request.ip,
     });
-    return reply.code(201).send({ id: rows[0]!.id, tempPassword: password });
+
+    return reply.code(201).send({
+      id: rows[0]!.id,
+      ...pass,
+    });
   });
 
   fastify.patch('/api/admin/vendors/:id', { preHandler: fastify.requireRole(['admin']) }, async (request) => {
     const id = (request.params as { id: string }).id;
-    const body = vendorSchema.partial().parse(request.body);
+    const body = vendorUpdateSchema.parse(request.body);
     const rows = await dbQuery(
       `
         UPDATE vendors
         SET name = COALESCE($2, name),
             location = COALESCE($3, location),
-            city = COALESCE($4, city),
-            category = COALESCE($5, category),
-            pos_type = COALESCE($6, pos_type),
-            email = COALESCE($7, email),
-            status = COALESCE($8, status),
+            category = COALESCE($4, category),
+            pos_type = COALESCE($5, pos_type),
+            status = COALESCE($6, status),
             updated_at = now()
         WHERE id = $1
         RETURNING *
       `,
-      [id, body.name ?? null, body.location ?? null, body.city ?? null, body.category ?? null, body.posType ?? null, body.email ?? null, body.status ?? null],
+      [id, body.name ?? null, body.location ?? null, body.category ?? null, body.posType ?? null, body.status ?? null],
     );
     return rows[0] ?? {};
+  });
+
+  fastify.get('/api/admin/vendors/:id', { preHandler: fastify.requireRole(['admin']) }, async (request, reply) => {
+    const id = (request.params as { id: string }).id;
+    const rows = await dbQuery(
+      `
+        SELECT v.*, vp.discount_code, vp.pkpass_base64 IS NOT NULL AS has_pass
+        FROM vendors v
+        LEFT JOIN vendor_passes vp ON vp.id = v.vendor_pass_id
+        WHERE v.id = $1
+        LIMIT 1
+      `,
+      [id],
+    );
+    if (rows.length === 0) {
+      return reply.code(404).send({ error: 'Vendor not found' });
+    }
+    return rows[0];
   });
 
   fastify.post('/api/admin/vendors/:id/approve', { preHandler: fastify.requireRole(['admin']) }, async (request) => {
@@ -138,14 +231,6 @@ export async function registerAdminRoutes(fastify: FastifyInstance): Promise<voi
   fastify.post('/api/admin/vendors/:id/reject', { preHandler: fastify.requireRole(['admin']) }, async (request) => {
     const id = (request.params as { id: string }).id;
     return dbQuery('UPDATE vendors SET status = \'rejected\', updated_at = now() WHERE id = $1 RETURNING *', [id]);
-  });
-
-  fastify.post('/api/admin/vendors/:id/reset-password', { preHandler: fastify.requireRole(['admin']) }, async (request) => {
-    const id = (request.params as { id: string }).id;
-    const tempPassword = generateTempPassword();
-    const hash = await bcrypt.hash(tempPassword, 10);
-    await dbQuery('UPDATE vendors SET password_hash = $2, updated_at = now() WHERE id = $1', [id, hash]);
-    return { tempPassword };
   });
 
   fastify.get('/api/admin/vendors/:id/activity', { preHandler: fastify.requireRole(['admin']) }, async (request) => {
@@ -161,15 +246,7 @@ export async function registerAdminRoutes(fastify: FastifyInstance): Promise<voi
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
       `,
-      [
-        body.name,
-        body.theme,
-        body.description ?? null,
-        body.imageUrl ?? null,
-        body.expirationDate ?? null,
-        body.maxUses ?? null,
-        body.status ?? 'draft',
-      ],
+      [body.name, body.theme, body.description ?? null, body.imageUrl ?? null, body.expirationDate ?? null, body.maxUses ?? null, body.status ?? 'draft'],
     );
     return reply.code(201).send({ id: rows[0]!.id });
   });
@@ -221,21 +298,8 @@ export async function registerAdminRoutes(fastify: FastifyInstance): Promise<voi
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
         RETURNING id
       `,
-      [
-        body.cardId,
-        body.vendorId,
-        body.type,
-        body.value,
-        body.minPurchase,
-        body.maxUsesTotal ?? null,
-        body.maxUsesPerCustomer ?? null,
-        JSON.stringify(body.cityOverrides),
-        body.active,
-      ],
+      [body.cardId, body.vendorId, body.type, body.value, body.minPurchase, body.maxUsesTotal ?? null, body.maxUsesPerCustomer ?? null, JSON.stringify(body.cityOverrides), body.active],
     );
-    void syncDiscountToVendorConnections({ discountId: rows[0]!.id, action: 'upsert' }).catch((error) => {
-      fastify.log.warn({ error, discountId: rows[0]!.id }, 'POS auto-sync failed');
-    });
     return reply.code(201).send({ id: rows[0]!.id });
   });
 
@@ -258,31 +322,49 @@ export async function registerAdminRoutes(fastify: FastifyInstance): Promise<voi
         WHERE id = $1
         RETURNING *
       `,
-      [
-        id,
-        body.cardId ?? null,
-        body.vendorId ?? null,
-        body.type ?? null,
-        body.value ?? null,
-        body.minPurchase ?? null,
-        body.maxUsesTotal ?? null,
-        body.maxUsesPerCustomer ?? null,
-        body.cityOverrides ? JSON.stringify(body.cityOverrides) : null,
-        body.active ?? null,
-      ],
+      [id, body.cardId ?? null, body.vendorId ?? null, body.type ?? null, body.value ?? null, body.minPurchase ?? null, body.maxUsesTotal ?? null, body.maxUsesPerCustomer ?? null, body.cityOverrides ? JSON.stringify(body.cityOverrides) : null, body.active ?? null],
     );
-    void syncDiscountToVendorConnections({ discountId: id, action: 'upsert' }).catch((error) => {
-      fastify.log.warn({ error, discountId: id }, 'POS auto-sync failed');
-    });
     return rows[0] ?? {};
   });
 
   fastify.delete('/api/admin/discounts/:id', { preHandler: fastify.requireRole(['admin']) }, async (request) => {
     const id = (request.params as { id: string }).id;
-    void deleteDiscountFromVendorConnections({ discountId: id }).catch((error) => {
-      fastify.log.warn({ error, discountId: id }, 'POS auto-sync failed');
-    });
     return dbQuery('DELETE FROM discounts WHERE id = $1 RETURNING id', [id]);
+  });
+
+  fastify.get('/api/vendor-passes/:id.pkpass', async (request, reply) => {
+    const id = (request.params as { id: string }).id;
+    const pass = await getVendorPassById(id);
+    if (!pass || !pass.pkpass_base64) {
+      return reply.code(404).send({ error: 'Pass not found' });
+    }
+    const buffer = Buffer.from(pass.pkpass_base64, 'base64');
+    return reply
+      .header('Content-Type', 'application/vnd.apple.pkpass')
+      .header('Content-Disposition', `attachment; filename="${pass.discount_code}.pkpass"`)
+      .send(buffer);
+  });
+
+  fastify.get('/api/vendor-passes/:id/icon.png', async (request, reply) => {
+    const id = (request.params as { id: string }).id;
+    const pass = await getVendorPassById(id);
+    const base64 = pass?.icon_png ?? '';
+    if (!base64) {
+      return reply.code(404).send({ error: 'Icon not found' });
+    }
+    const buffer = Buffer.from(base64, 'base64');
+    return reply.header('Content-Type', 'image/png').send(buffer);
+  });
+
+  fastify.get('/api/vendor-passes/:id/logo.png', async (request, reply) => {
+    const id = (request.params as { id: string }).id;
+    const pass = await getVendorPassById(id);
+    const base64 = pass?.logo_png ?? '';
+    if (!base64) {
+      return reply.code(404).send({ error: 'Logo not found' });
+    }
+    const buffer = Buffer.from(base64, 'base64');
+    return reply.header('Content-Type', 'image/png').send(buffer);
   });
 }
 

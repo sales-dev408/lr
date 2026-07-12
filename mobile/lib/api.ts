@@ -14,6 +14,7 @@ import type {
   PassDetail,
   RedeemResult,
   UserProfile,
+  Vendor,
   WalletPlatform,
 } from './types';
 import { getItem } from './storage';
@@ -182,11 +183,11 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   return (await response.json()) as T;
 }
 
-export async function login(body: { email?: string; phone?: string; password: string; captchaToken?: string }) {
+export async function login(body: { email?: string; phone?: string; password: string }) {
   return apiRequest<AuthResponse<UserProfile>>('/auth/login', { method: 'POST', body: JSON.stringify(body) });
 }
 
-export async function register(body: { email?: string; phone?: string; password: string; fullName: string; social?: string; captchaToken?: string }) {
+export async function register(body: { email?: string; phone?: string; password: string; fullName: string; social?: string }) {
   return apiRequest<AuthResponse<UserProfile>>('/auth/register', { method: 'POST', body: JSON.stringify(body) });
 }
 
@@ -261,3 +262,34 @@ export async function redeem(body: {
 }) {
   return apiRequest<RedeemResult>('/redeem', { method: 'POST', body: JSON.stringify(body) });
 }
+
+function normalizeVendor(input: Record<string, unknown>): Vendor {
+  return {
+    id: String(input.id),
+    name: String(input.name),
+    location: (input.location as string | null | undefined) ?? null,
+    city: (input.city as string | null | undefined) ?? null,
+    category: (input.category as string | null | undefined) ?? null,
+    pos_type: (input.pos_type as string | null | undefined) ?? (input.posType as string | null | undefined) ?? null,
+    discount_type: (input.discount_type as string | null | undefined) ?? (input.discountType as string | null | undefined) ?? null,
+    discount_amount: toNullableNumber(input.discount_amount ?? input.discountAmount),
+    passUrl: (input.passUrl as string | null | undefined) ?? null,
+    status: String(input.status),
+  };
+}
+
+export async function listVendors(params?: { category?: string }) {
+  const query = new URLSearchParams();
+  if (params?.category) {
+    query.set('category', params.category);
+  }
+  const queryString = query.toString();
+  const vendors = await apiRequest<Record<string, unknown>[]>('/vendors' + (queryString ? `?${queryString}` : ''));
+  return vendors.map(normalizeVendor);
+}
+
+export async function getVendor(id: string) {
+  const vendor = await apiRequest<Record<string, unknown>>(`/vendors/${encodeURIComponent(id)}`);
+  return normalizeVendor(vendor);
+}
+

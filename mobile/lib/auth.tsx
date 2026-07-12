@@ -9,8 +9,8 @@ type AuthContextValue = {
   loading: boolean;
   token: string | null;
   profile: UserProfile | null;
-  loginWithPassword: (body: { email?: string; phone?: string; password: string; captchaToken?: string }) => Promise<void>;
-  registerAccount: (body: { email?: string; phone?: string; password: string; fullName: string; captchaToken?: string }) => Promise<void>;
+  loginWithPassword: (body: { email?: string; phone?: string; password: string }) => Promise<void>;
+  registerAccount: (body: { email?: string; phone?: string; password: string; fullName: string }) => Promise<void>;
   loginWithSocial: () => Promise<void>;
   logout: () => Promise<void>;
 };

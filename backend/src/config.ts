@@ -25,7 +25,6 @@ const envSchema = z.object({
   GOOGLE_WALLET_SERVICE_ACCOUNT_JSON: z.string().trim().default(''),
   POS_TOKEN_ENC_KEY: z.string().trim().default(''),
   POS_STATE_SECRET: z.string().trim().default('dev-pos-state-secret'),
-  VENDOR_PORTAL_URL: z.string().url().default('http://localhost:5174'),
   SQUARE_APP_ID: z.string().trim().default(''),
   SQUARE_APP_SECRET: z.string().trim().default(''),
   SQUARE_ENV: z.enum(['sandbox', 'production']).default('sandbox'),
@@ -43,6 +42,9 @@ const envSchema = z.object({
   PLAY_STORE_URL: z.string().url().default('https://play.google.com/store'),
   ALLOWED_ORIGINS: z.string().trim().default(''),
   BLOCKED_IPS: z.string().trim().default(''),
+  ADDPASS_API_KEY: z.string().trim().default(''),
+  BASE_URL: z.string().trim().default('http://localhost:4000'),
+  SUPABASE_URL: z.string().trim().default(''),
 });
 
 const parsed = envSchema.parse(process.env);
@@ -69,7 +71,6 @@ export const config = {
   googleWalletServiceAccountJson: parsed.GOOGLE_WALLET_SERVICE_ACCOUNT_JSON,
   posTokenEncKey: parsed.POS_TOKEN_ENC_KEY,
   posStateSecret: parsed.POS_STATE_SECRET,
-  vendorPortalUrl: parsed.VENDOR_PORTAL_URL,
   squareAppId: parsed.SQUARE_APP_ID,
   squareAppSecret: parsed.SQUARE_APP_SECRET,
   squareEnv: parsed.SQUARE_ENV,
@@ -87,6 +88,9 @@ export const config = {
   playStoreUrl: parsed.PLAY_STORE_URL,
   allowedOrigins: parsed.ALLOWED_ORIGINS.split(',').map((item) => item.trim()).filter(Boolean),
   blockedIps: parsed.BLOCKED_IPS.split(',').map((item) => item.trim()).filter(Boolean),
+  addpassApiKey: parsed.ADDPASS_API_KEY,
+  baseUrl: parsed.BASE_URL,
+  supabaseUrl: parsed.SUPABASE_URL,
 } as const;
 
 export type AppConfig = typeof config;

@@ -41,9 +41,10 @@ export function computeDiscountAmount(input: { type: 'fixed' | 'percent' | 'bogo
   return { amountApplied: input.value };
 }
 
-export function toAppliedDiscount(input: { type: 'fixed' | 'percent' | 'bogo'; value: number; purchaseAmount?: number | null }): { type: 'fixed' | 'percent' | 'bogo'; value: number; instruction?: string } {
+export function toAppliedDiscount(input: { type: 'fixed' | 'percent' | 'bogo'; value: number; purchaseAmount?: number | null }): { type: 'fixed' | 'percent' | 'bogo'; value: number; description: string; instruction?: string } {
   const computed = computeDiscountAmount(input);
-  return { type: input.type, value: input.value, ...(computed.instruction ? { instruction: computed.instruction } : {}) };
+  const description = input.type === 'bogo' ? 'Buy one, get one offer' : input.type === 'percent' ? `${input.value}% off` : `$${input.value.toFixed(2)} off`;
+  return { type: input.type, value: input.value, description, ...(computed.instruction ? { instruction: computed.instruction } : {}) };
 }
 
 export function buildLookupDiscountView(discount: DiscountRule, city?: string | null) {
@@ -54,6 +55,7 @@ export function buildLookupDiscountView(discount: DiscountRule, city?: string | 
     cityOverrides: discount.city_overrides,
   };
   const adjusted = applyCityRules(normalized, city ?? null);
+  const applied = toAppliedDiscount({ type: adjusted.type, value: adjusted.value });
   return {
     id: discount.id,
     cardId: discount.card_id,
@@ -66,5 +68,6 @@ export function buildLookupDiscountView(discount: DiscountRule, city?: string | 
     usesCount: discount.uses_count,
     cityOverrides: discount.city_overrides,
     active: discount.active,
+    applied,
   };
 }

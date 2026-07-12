@@ -154,6 +154,19 @@ export interface LookupResult {
   }[];
 }
 
+export interface Vendor {
+  id: string;
+  name: string;
+  location: string | null;
+  city: string | null;
+  category: string | null;
+  pos_type: string | null;
+  discount_type: string | null;
+  discount_amount: number | null;
+  passUrl: string | null;
+  status: string;
+}
+
 export interface RedeemResult {
   valid: boolean;
   reason?: string;

@@ -159,14 +159,7 @@ export default function CardDetailScreen() {
           </AppButton>
           {result ? <Banner tone="info">{walletMessage(result.wallet)}</Banner> : null}
           {result ? (
-            <>
-              <Text selectable style={{ color: '#52617a' }}>
-                Pass serial: {result.pass.serialNumber}
-              </Text>
-              <Text selectable style={{ color: '#52617a' }}>
-                Lookup token: {result.pass.lookupToken}
-              </Text>
-            </>
+            <Banner tone="success">Pass added. Open it in your wallet to use at the register.</Banner>
           ) : null}
         </Card>
       </ScrollView>

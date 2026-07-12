@@ -19,7 +19,7 @@ export async function registerHealthRoutes(fastify: FastifyInstance): Promise<vo
   });
 
   fastify.get('/', async () => ({
-    name: 'Master Gift/Discount Card System Backend',
+    name: 'Light Rail Deals Backend',
     version: '0.1.0',
   }));
 }

@@ -31,6 +31,8 @@ export interface AdminProfile {
   id: string;
   email: string;
   role: string;
+  fullName: string | null;
+  location: string | null;
 }
 
 export interface CardRecord {
@@ -67,6 +69,7 @@ export interface RedeemResult {
   discount?: {
     type: 'fixed' | 'percent' | 'bogo';
     value: number;
+    description: string;
     instruction?: string;
   };
   redemptionId?: string;

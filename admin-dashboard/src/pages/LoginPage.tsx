@@ -9,7 +9,6 @@ export function LoginPage() {
   const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [captchaToken, setCaptchaToken] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -18,7 +17,7 @@ export function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      const auth = await loginAdmin({ email, password, ...(captchaToken ? { captchaToken } : {}) });
+      const auth = await loginAdmin({ email, password });
       login(auth);
       navigate('/');
     } catch (err) {
@@ -40,10 +39,6 @@ export function LoginPage() {
           <label>
             Password
             <Input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required />
-          </label>
-          <label>
-            CAPTCHA token
-            <Input value={captchaToken} onChange={(event) => setCaptchaToken(event.target.value)} placeholder="Optional in dev" />
           </label>
           <Button type="submit" disabled={loading}>
             {loading ? 'Signing in…' : 'Sign in'}

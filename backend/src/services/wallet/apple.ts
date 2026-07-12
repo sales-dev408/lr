@@ -19,7 +19,7 @@ export function buildApplePassJson(input: ApplePassInput) {
     passTypeIdentifier: config.applePassTypeId || 'pass.com.example.mastercard',
     serialNumber: input.serialNumber,
     teamIdentifier: config.appleTeamId || 'TEAMID',
-    organizationName: 'Master Gift/Discount Card System',
+    organizationName: 'Light Rail Deals',
     description: input.description ?? input.cardName,
     backgroundColor: 'rgb(30,30,30)',
     foregroundColor: 'rgb(255,255,255)',
@@ -37,10 +37,6 @@ export function buildApplePassJson(input: ApplePassInput) {
         messageEncoding: 'iso-8859-1',
       },
     ],
-    nfc: {
-      message: input.lookupToken,
-      encryptionPublicKey: generateOpaqueToken(32),
-    },
   };
 }
 

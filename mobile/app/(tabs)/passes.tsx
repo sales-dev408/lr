@@ -1,14 +1,11 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, Text } from 'react-native';
-import { Link } from 'expo-router';
+import { Linking, ScrollView } from 'react-native';
 import { AppButton, Banner, Card, Screen, SectionTitle, Spinner } from '@/components/Ui';
-import { getPass } from '@/lib/api';
 import { loadStoredPasses } from '@/lib/passes';
-import type { PassDetail, StoredPass } from '@/lib/types';
+import type { StoredPass } from '@/lib/types';
 
 export default function PassesScreen() {
   const [passes, setPasses] = useState<StoredPass[]>([]);
-  const [details, setDetails] = useState<Record<string, PassDetail>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -19,34 +16,8 @@ export default function PassesScreen() {
       setError(null);
       try {
         const stored = await loadStoredPasses();
-        if (!mounted) {
-          return;
-        }
-        setPasses(stored);
-        const fresh: Record<string, PassDetail> = {};
-        for (const item of stored) {
-          try {
-            fresh[item.serialNumber] = await getPass(item.serialNumber);
-          } catch {
-            fresh[item.serialNumber] = {
-              id: item.passId,
-              user_id: '',
-              card_id: '',
-              platform: item.platform,
-              serial_number: item.serialNumber,
-              auth_token: item.authToken,
-              lookup_token: item.lookupToken,
-              device_library_id: null,
-              push_token: null,
-              created_at: item.addedAt,
-              updated_at: item.addedAt,
-              card_name: item.cardName,
-              card_description: item.description,
-            };
-          }
-        }
         if (mounted) {
-          setDetails(fresh);
+          setPasses(stored);
         }
       } catch (err) {
         if (mounted) {
@@ -64,34 +35,41 @@ export default function PassesScreen() {
     };
   }, []);
 
+  async function openPass(pass: StoredPass) {
+    const url = pass.walletUrl;
+    if (!url) {
+      setError('No wallet link for this pass.');
+      return;
+    }
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (supported) {
+        await Linking.openURL(url);
+      } else {
+        setError('Unable to open this pass on this device.');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Open failed');
+    }
+  }
+
   return (
     <Screen>
       <ScrollView contentContainerStyle={{ gap: 14, paddingBottom: 24 }}>
         <Card>
-          <SectionTitle title="My passes" subtitle="Local pass list backed by the real pass detail endpoint where available." />
-          <Banner tone="info">
-            This scaffold does not have a backend list endpoint for customer passes, so newly created passes are saved locally and refreshed with GET /passes/:serial when available.
-          </Banner>
+          <SectionTitle title="My passes" subtitle="Passes saved from cards or vendors." />
         </Card>
 
         {loading ? <Spinner /> : null}
         {error ? <Banner tone="error">{error}</Banner> : null}
-        {!loading && passes.length === 0 ? <Banner tone="info">No saved passes yet. Add one from a card detail page.</Banner> : null}
+        {!loading && passes.length === 0 ? <Banner tone="info">No saved passes yet. Add one from a vendor page.</Banner> : null}
 
-        {passes.map((pass) => {
-          const detail = details[pass.serialNumber];
-          return (
-            <Card key={pass.serialNumber}>
-              <SectionTitle title={pass.cardName} subtitle={pass.platform === 'apple' ? 'Apple Wallet' : 'Google Wallet'} />
-              <Text style={{ color: '#52617a' }}>Serial: {pass.serialNumber}</Text>
-              <Text style={{ color: '#52617a' }}>Lookup token: {pass.lookupToken}</Text>
-              {detail?.card_name ? <Text style={{ color: '#10223d' }}>{detail.card_name}</Text> : null}
-              <Link href={`/pass/${pass.serialNumber}`} asChild>
-                <AppButton>Open pass</AppButton>
-              </Link>
-            </Card>
-          );
-        })}
+        {passes.map((pass) => (
+          <Card key={pass.serialNumber}>
+            <SectionTitle title={pass.cardName} subtitle={pass.platform === 'apple' ? 'Apple Wallet' : 'Google Wallet'} />
+            <AppButton onPress={() => void openPass(pass)}>Open pass</AppButton>
+          </Card>
+        ))}
       </ScrollView>
     </Screen>
   );

@@ -6,6 +6,7 @@ import type {
   CardSummary,
   DiscountSummary,
   VendorActivityRecord,
+  VendorPassResult,
   VendorRecord,
 } from './types';
 
@@ -23,11 +24,11 @@ export class ApiError extends Error {
   }
 }
 
-function getBaseUrl(): string {
+export function getBaseUrl(): string {
   return import.meta.env.VITE_API_BASE_URL || '/api';
 }
 
-function normalizePath(path: string): string {
+export function normalizePath(path: string): string {
   return path.startsWith('/') ? path : `/${path}`;
 }
 
@@ -198,7 +199,6 @@ function normalizeCard(input: Record<string, unknown>): CardSummary {
 export async function loginAdmin(body: {
   email: string;
   password: string;
-  captchaToken?: string;
 }): Promise<AuthResponse<AdminProfile>> {
   return apiRequest<AuthResponse<AdminProfile>>('/auth/admin/login', {
     method: 'POST',
@@ -206,45 +206,55 @@ export async function loginAdmin(body: {
   });
 }
 
+export async function getAdminMe(): Promise<AdminProfile> {
+  return apiRequest<AdminProfile>('/admin/me');
+}
+
+export async function updateAdminMe(body: {
+  email?: string;
+  fullName?: string;
+  location?: string;
+  password?: string;
+}): Promise<AdminProfile> {
+  return apiRequest<AdminProfile>('/admin/me', { method: 'PATCH', body: jsonBody(body) });
+}
+
 export async function getAdminAnalytics(params: { from?: string; to?: string; city?: string }): Promise<AdminAnalyticsResponse> {
   return apiRequest<AdminAnalyticsResponse>(`/admin/analytics${buildQuery(params)}`);
 }
 
-export async function listAdminVendors(params: { status?: string; city?: string; category?: string }): Promise<VendorRecord[]> {
+export async function listAdminVendors(params: { status?: string; category?: string }): Promise<VendorRecord[]> {
   return apiRequest<VendorRecord[]>(`/admin/vendors${buildQuery(params)}`);
 }
 
 export async function createAdminVendor(body: {
   name: string;
-  location?: string;
-  city?: string;
-  category?: string;
+  location: string;
+  category: string;
   posType: string;
-  email: string;
-  password?: string;
+  discountType: 'fixed' | 'percent';
+  discountAmount: number;
+  iconPng?: string;
+  logoPng?: string;
   status?: string;
-}): Promise<{ id: string; tempPassword: string }> {
-  return apiRequest('/admin/vendors', { method: 'POST', body: jsonBody(body) });
+}): Promise<VendorPassResult> {
+  return apiRequest<VendorPassResult>('/admin/vendors', { method: 'POST', body: jsonBody(body) });
 }
 
 export async function updateAdminVendor(id: string, body: Partial<VendorRecord & { posType: string }>): Promise<VendorRecord> {
-  return apiRequest(`/admin/vendors/${id}`, { method: 'PATCH', body: jsonBody(body) });
+  return apiRequest<VendorRecord>(`/admin/vendors/${id}`, { method: 'PATCH', body: jsonBody(body) });
 }
 
 export async function approveVendor(id: string): Promise<VendorRecord[]> {
-  return apiRequest(`/admin/vendors/${id}/approve`, { method: 'POST' });
+  return apiRequest<VendorRecord[]>(`/admin/vendors/${id}/approve`, { method: 'POST' });
 }
 
 export async function rejectVendor(id: string): Promise<VendorRecord[]> {
-  return apiRequest(`/admin/vendors/${id}/reject`, { method: 'POST' });
-}
-
-export async function resetVendorPassword(id: string): Promise<{ tempPassword: string }> {
-  return apiRequest(`/admin/vendors/${id}/reset-password`, { method: 'POST' });
+  return apiRequest<VendorRecord[]>(`/admin/vendors/${id}/reject`, { method: 'POST' });
 }
 
 export async function getVendorActivity(id: string): Promise<VendorActivityRecord[]> {
-  return apiRequest(`/admin/vendors/${id}/activity`);
+  return apiRequest<VendorActivityRecord[]>(`/admin/vendors/${id}/activity`);
 }
 
 export async function listAdminCards(): Promise<CardSummary[]> {

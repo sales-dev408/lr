@@ -3,12 +3,13 @@ export type CardTheme = 'sports' | 'entertainment' | 'shops_restaurants';
 export type VendorStatus = 'pending' | 'approved' | 'rejected' | 'suspended';
 export type CardStatus = 'draft' | 'active' | 'archived';
 export type DiscountType = 'fixed' | 'percent' | 'bogo';
-export type PosType = 'square' | 'stripe' | 'clover' | 'toast' | 'other';
 
 export interface AdminProfile {
   id: string;
   email: string;
   role: AdminRole;
+  fullName: string | null;
+  location: string | null;
 }
 
 export interface AuthResponse<TProfile> {
@@ -43,16 +44,28 @@ export interface AdminAnalyticsResponse {
   }>;
 }
 
+export interface VendorPassResult {
+  id: string;
+  vendorPassId: string;
+  discountCode: string;
+  pkpassUrl: string;
+  embedCode: string;
+  instructions: string;
+}
+
 export interface VendorRecord {
   id: string;
   name: string;
   location: string | null;
   city: string | null;
   category: string | null;
-  pos_type: PosType;
-  email: string;
+  pos_type: string;
+  discount_type: string | null;
+  discount_amount: number | null;
+  vendor_pass_id: string | null;
+  discount_code: string | null;
+  has_pass: boolean;
   status: VendorStatus;
-  password_hash?: string;
   created_at?: string;
   updated_at?: string;
 }

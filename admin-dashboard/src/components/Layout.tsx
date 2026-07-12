@@ -10,10 +10,10 @@ export function AppLayout() {
       <aside className="sidebar">
         <div>
           <div className="brand">
-            <span className="brand-mark">A</span>
+            <img src="/logo.png" alt="Light Rail Deals" className="brand-logo" />
             <div>
-              <strong>Admin Dashboard</strong>
-              <p className="muted">Platform owner console</p>
+              <strong>Light Rail Deals</strong>
+              <p className="muted">Admin console</p>
             </div>
           </div>
           <nav className="nav">
@@ -23,14 +23,15 @@ export function AppLayout() {
             <NavLink to="/vendors">Vendors</NavLink>
             <NavLink to="/cards">Cards</NavLink>
             <NavLink to="/audit">Audit</NavLink>
+            <NavLink to="/settings">Settings</NavLink>
           </nav>
         </div>
       </aside>
       <div className="content">
         <header className="topbar">
           <div>
-            <strong>{profile?.email}</strong>
-            <p className="muted">Role: {profile?.role}</p>
+            <strong>{profile?.fullName || profile?.email}</strong>
+            <p className="muted">{profile?.location ? profile.location : `Role: ${profile?.role}`}</p>
           </div>
           <Button variant="secondary" onClick={logout}>
             Logout

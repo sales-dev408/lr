@@ -1,10 +1,9 @@
 {
-  "name": "master-gift-discount-card-system",
+  "name": "light-rail-deals",
   "private": true,
   "version": "0.1.0",
   "workspaces": [
     "backend",
-    "admin-dashboard",
-    "vendor-portal"
+    "admin-dashboard"
   ]
 }

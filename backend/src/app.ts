@@ -5,11 +5,10 @@ import { registerHealthRoutes } from './routes/health.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerCardRoutes } from './routes/cards.js';
 import { registerAdminRoutes } from './routes/admin.js';
-import { registerVendorRoutes } from './routes/vendor.js';
+import { registerVendorPublicRoutes } from './routes/vendors.js';
 import { registerPassRoutes } from './routes/passes.js';
 import { registerLookupRoutes } from './routes/lookup.js';
 import { registerQrRoutes } from './routes/qr.js';
-import { registerPosRoutes } from './routes/pos.js';
 
 export async function buildApp() {
   const app = fastify({
@@ -24,11 +23,10 @@ export async function buildApp() {
   await registerAuthRoutes(app);
   await registerCardRoutes(app);
   await registerAdminRoutes(app);
-  await registerVendorRoutes(app);
+  await registerVendorPublicRoutes(app);
   await registerPassRoutes(app);
   await registerLookupRoutes(app);
   await registerQrRoutes(app);
-  await registerPosRoutes(app);
 
   return app;
 }

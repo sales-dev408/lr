@@ -39,6 +39,8 @@ export interface AdminProfile {
   id: string;
   email: string;
   role: AdminRole;
+  fullName: string | null;
+  location: string | null;
 }
 
 export interface CardRecord {

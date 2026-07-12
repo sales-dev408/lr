@@ -1,33 +1,42 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import {
-  approveVendor,
-  createAdminVendor,
-  getVendorActivity,
-  listAdminVendors,
-  rejectVendor,
-  resetVendorPassword,
-  updateAdminVendor,
-} from '../lib/api';
-import type { VendorActivityRecord, VendorRecord } from '../lib/types';
+import { useEffect, useMemo, useState, type FormEvent, type ChangeEvent } from 'react';
+import { approveVendor, createAdminVendor, getBaseUrl, getVendorActivity, listAdminVendors, normalizePath, rejectVendor, updateAdminVendor } from '../lib/api';
+import type { VendorActivityRecord, VendorPassResult, VendorRecord } from '../lib/types';
 import { Button, EmptyState, ErrorBanner, Modal, PageCard, Select, Input, Badge } from '../components/Ui';
 import { useAuth } from '../lib/auth';
 
 const blankVendor = {
   name: '',
   location: '',
-  city: '',
-  category: '',
-  posType: 'square',
-  email: '',
-  password: '',
-  status: 'pending',
+  category: 'Sports' as 'Sports' | 'Dining' | 'Entertainment',
+  posType: '',
+  discountType: 'percent' as 'fixed' | 'percent',
+  discountAmount: '15',
+  iconPng: '',
+  logoPng: '',
+  status: 'approved',
 };
+
+function readFileBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result.split(',')[1] ?? '');
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function passUrl(passId: string): string {
+  return `${getBaseUrl()}${normalizePath(`/vendor-passes/${passId}.pkpass`)}`;
+}
 
 export function VendorsPage() {
   const { profile } = useAuth();
   const readOnly = profile?.role === 'analyst';
   const [vendors, setVendors] = useState<VendorRecord[]>([]);
-  const [filters, setFilters] = useState({ status: '', city: '', category: '' });
+  const [filters, setFilters] = useState({ status: '', category: '' });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [activity, setActivity] = useState<VendorActivityRecord[]>([]);
@@ -35,6 +44,7 @@ export function VendorsPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [editing, setEditing] = useState<VendorRecord | null>(null);
   const [form, setForm] = useState(blankVendor);
+  const [created, setCreated] = useState<VendorPassResult | null>(null);
 
   async function load() {
     setLoading(true);
@@ -42,7 +52,6 @@ export function VendorsPage() {
     try {
       const data = await listAdminVendors({
         ...(filters.status ? { status: filters.status } : {}),
-        ...(filters.city ? { city: filters.city } : {}),
         ...(filters.category ? { category: filters.category } : {}),
       });
       setVendors(data);
@@ -55,19 +64,38 @@ export function VendorsPage() {
 
   useEffect(() => {
     void load();
-  }, [filters.status, filters.city, filters.category]);
+  }, [filters.status, filters.category]);
 
   const sorted = useMemo(() => vendors.slice().sort((a, b) => a.name.localeCompare(b.name)), [vendors]);
+
+  async function handleFileChange(field: 'iconPng' | 'logoPng', event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const base64 = await readFileBase64(file);
+      setForm((prev) => ({ ...prev, [field]: base64 }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to read image');
+    }
+  }
 
   async function submitCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (readOnly) return;
     try {
       const result = await createAdminVendor({
-        ...form,
-        password: form.password || undefined,
+        name: form.name,
+        location: form.location,
+        category: form.category,
+        posType: form.posType,
+        discountType: form.discountType,
+        discountAmount: Number(form.discountAmount),
+        iconPng: form.iconPng || undefined,
+        logoPng: form.logoPng || undefined,
+        status: form.status,
       });
-      setToast(`Vendor created. Temp password: ${result.tempPassword}`);
+      setCreated(result);
+      setToast('Vendor created. Discount code and pass are ready below.');
       setForm(blankVendor);
       await load();
     } catch (err) {
@@ -82,10 +110,8 @@ export function VendorsPage() {
       await updateAdminVendor(editing.id, {
         name: editing.name,
         location: editing.location ?? null,
-        city: editing.city ?? null,
         category: editing.category ?? null,
         posType: editing.pos_type,
-        email: editing.email,
         status: editing.status,
       });
       setEditing(null);
@@ -119,26 +145,15 @@ export function VendorsPage() {
     }
   }
 
-  async function handleResetPassword(vendorId: string) {
-    if (readOnly) return;
-    try {
-      const result = await resetVendorPassword(vendorId);
-      setToast(`Temporary password: ${result.tempPassword}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Reset failed');
-    }
-  }
-
   return (
     <div className="stack">
       <div className="page-heading">
         <div>
           <h1>Vendors</h1>
-          <p className="muted">Approve vendors, reset credentials, and review activity.</p>
+          <p className="muted">Create vendors, generate discount codes, and download Apple Wallet passes.</p>
         </div>
         <div className="filters">
           <Input placeholder="Status" value={filters.status} onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))} />
-          <Input placeholder="City" value={filters.city} onChange={(e) => setFilters((prev) => ({ ...prev, city: e.target.value }))} />
           <Input placeholder="Category" value={filters.category} onChange={(e) => setFilters((prev) => ({ ...prev, category: e.target.value }))} />
         </div>
       </div>
@@ -147,24 +162,32 @@ export function VendorsPage() {
       {toast ? <div className="banner banner-success">{toast}</div> : null}
 
       <div className="grid-2">
-        <PageCard title="Create vendor" subtitle={readOnly ? 'Read-only analyst mode' : 'Add a new participating business.'}>
+        <PageCard title="Create vendor" subtitle={readOnly ? 'Read-only analyst mode' : 'Add a new participating business and generate a pass.'}>
           <form className="form" onSubmit={submitCreate}>
-            <Input placeholder="Name" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} required />
-            <Input placeholder="Location" value={form.location} onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))} />
-            <Input placeholder="City" value={form.city} onChange={(e) => setForm((prev) => ({ ...prev, city: e.target.value }))} />
-            <Input placeholder="Category" value={form.category} onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))} />
-            <Select value={form.posType} onChange={(e) => setForm((prev) => ({ ...prev, posType: e.target.value }))}>
-              <option value="square">Square</option>
-              <option value="stripe">Stripe</option>
-              <option value="clover">Clover</option>
-              <option value="toast">Toast</option>
-              <option value="other">Other</option>
+            <Input placeholder="Vendor name" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} required />
+            <Input placeholder="Address" value={form.location} onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))} required />
+            <Select value={form.category} onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value as typeof prev.category }))}>
+              <option value="Sports">Sports</option>
+              <option value="Dining">Dining</option>
+              <option value="Entertainment">Entertainment</option>
             </Select>
-            <Input placeholder="Email" type="email" value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} required />
-            <Input placeholder="Temp password (optional)" type="password" value={form.password} onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))} />
+            <Input placeholder="POS system name" value={form.posType} onChange={(e) => setForm((prev) => ({ ...prev, posType: e.target.value }))} required />
+            <Select value={form.discountType} onChange={(e) => setForm((prev) => ({ ...prev, discountType: e.target.value as 'fixed' | 'percent' }))}>
+              <option value="percent">Percent (%)</option>
+              <option value="fixed">Fixed amount ($)</option>
+            </Select>
+            <Input type="number" step="0.01" placeholder="Discount amount" value={form.discountAmount} onChange={(e) => setForm((prev) => ({ ...prev, discountAmount: e.target.value }))} required />
+            <label>
+              Icon PNG (optional)
+              <input type="file" accept="image/png" onChange={(e) => void handleFileChange('iconPng', e)} />
+            </label>
+            <label>
+              Logo PNG (optional)
+              <input type="file" accept="image/png" onChange={(e) => void handleFileChange('logoPng', e)} />
+            </label>
             <Select value={form.status} onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value }))}>
-              <option value="pending">Pending</option>
               <option value="approved">Approved</option>
+              <option value="pending">Pending</option>
               <option value="rejected">Rejected</option>
               <option value="suspended">Suspended</option>
             </Select>
@@ -181,9 +204,10 @@ export function VendorsPage() {
                 <div>
                   <strong>{vendor.name}</strong>
                   <p className="muted">
-                    {vendor.city ?? '—'} · {vendor.category ?? '—'} · {vendor.pos_type}
+                    {vendor.location ?? '—'} · {vendor.category ?? '—'} · {vendor.pos_type}
                   </p>
                   <Badge tone={vendor.status === 'approved' ? 'success' : vendor.status === 'rejected' ? 'danger' : 'warning'}>{vendor.status}</Badge>
+                  {vendor.discount_code ? <p className="muted">Code: {vendor.discount_code}</p> : null}
                 </div>
                 <div className="row-actions">
                   <Button variant="secondary" disabled={readOnly} onClick={() => setEditing(vendor)}>
@@ -198,9 +222,11 @@ export function VendorsPage() {
                   <Button variant="secondary" disabled={readOnly} onClick={() => handleStatusAction('reject', vendor.id)}>
                     Reject
                   </Button>
-                  <Button variant="secondary" disabled={readOnly} onClick={() => handleResetPassword(vendor.id)}>
-                    Reset password
-                  </Button>
+                  {vendor.vendor_pass_id ? (
+                    <a className="btn btn-secondary" href={passUrl(vendor.vendor_pass_id)} download target="_blank" rel="noreferrer">
+                      Download pass
+                    </a>
+                  ) : null}
                 </div>
               </article>
             ))}
@@ -208,21 +234,36 @@ export function VendorsPage() {
         </PageCard>
       </div>
 
+      {created ? (
+        <PageCard title="Generated pass" subtitle="Share the discount code, embed code, and pass with the merchant.">
+          <div className="form">
+            <Input readOnly value={created.discountCode} onClick={(e) => e.currentTarget.select()} />
+            <Input readOnly value={created.pkpassUrl} onClick={(e) => e.currentTarget.select()} />
+            <label>
+              Apple Wallet embed code
+              <textarea className="textarea" readOnly rows={3} value={created.embedCode} onClick={(e) => e.currentTarget.select()} />
+            </label>
+            <p className="muted">{created.instructions}</p>
+            <a className="btn btn-primary" href={created.pkpassUrl} download>
+              Download .pkpass
+            </a>
+            <Button variant="secondary" onClick={() => setCreated(null)}>Dismiss</Button>
+          </div>
+        </PageCard>
+      ) : null}
+
       <Modal open={Boolean(editing)} title="Edit vendor" onClose={() => setEditing(null)}>
         {editing ? (
           <form className="form" onSubmit={submitUpdate}>
             <Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
             <Input value={editing.location ?? ''} onChange={(e) => setEditing({ ...editing, location: e.target.value })} />
-            <Input value={editing.city ?? ''} onChange={(e) => setEditing({ ...editing, city: e.target.value })} />
-            <Input value={editing.category ?? ''} onChange={(e) => setEditing({ ...editing, category: e.target.value })} />
-            <Select value={editing.pos_type} onChange={(e) => setEditing({ ...editing, pos_type: e.target.value as VendorRecord['pos_type'] })}>
-              <option value="square">Square</option>
-              <option value="stripe">Stripe</option>
-              <option value="clover">Clover</option>
-              <option value="toast">Toast</option>
-              <option value="other">Other</option>
+            <Select value={editing.category ?? ''} onChange={(e) => setEditing({ ...editing, category: e.target.value })}>
+              <option value="">—</option>
+              <option value="Sports">Sports</option>
+              <option value="Dining">Dining</option>
+              <option value="Entertainment">Entertainment</option>
             </Select>
-            <Input value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} />
+            <Input value={editing.pos_type} onChange={(e) => setEditing({ ...editing, pos_type: e.target.value })} />
             <Select value={editing.status} onChange={(e) => setEditing({ ...editing, status: e.target.value as VendorRecord['status'] })}>
               <option value="pending">Pending</option>
               <option value="approved">Approved</option>

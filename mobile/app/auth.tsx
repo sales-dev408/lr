@@ -14,7 +14,6 @@ export default function AuthScreen() {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const [captchaToken, setCaptchaToken] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -29,7 +28,6 @@ export default function AuthScreen() {
           ...(email ? { email } : {}),
           ...(phone ? { phone } : {}),
           password,
-          captchaToken: captchaToken || undefined,
         });
       } else {
         await auth.registerAccount({
@@ -37,7 +35,6 @@ export default function AuthScreen() {
           ...(phone ? { phone } : {}),
           password,
           fullName: fullName || 'Customer',
-          captchaToken: captchaToken || undefined,
         });
       }
       router.replace('/(tabs)');
@@ -52,13 +49,12 @@ export default function AuthScreen() {
     <Screen>
       <ScrollView contentContainerStyle={{ gap: 14, paddingBottom: 24 }}>
         <Card>
-          <SectionTitle title="Customer sign in" subtitle="Email or phone + password. CAPTCHA is a scaffold field here." />
+          <SectionTitle title="Customer sign in" subtitle="Email or phone + password." />
           {error ? <Banner tone="error">{error}</Banner> : null}
           <FieldInput value={email} onChangeText={setEmail} placeholder="Email" autoCapitalize="none" keyboardType="email-address" />
           <FieldInput value={phone} onChangeText={setPhone} placeholder="Phone" autoCapitalize="none" keyboardType="phone-pad" />
           {mode === 'register' ? <FieldInput value={fullName} onChangeText={setFullName} placeholder="Full name" /> : null}
           <FieldInput value={password} onChangeText={setPassword} placeholder="Password" secureTextEntry />
-          <FieldInput value={captchaToken} onChangeText={setCaptchaToken} placeholder="CAPTCHA token (optional scaffold)" autoCapitalize="none" />
           <AppButton onPress={() => void submit()}>{loading ? 'Working…' : submitLabel}</AppButton>
           <AppButton variant="secondary" onPress={() => setMode(mode === 'login' ? 'register' : 'login')}>
             Switch to {mode === 'login' ? 'register' : 'login'}

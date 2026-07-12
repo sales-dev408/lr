@@ -49,7 +49,7 @@ export function OverviewPage() {
     <div className="stack">
       <div className="page-heading">
         <div>
-          <h1>Overview</h1>
+          <h1>Light Rail Deals Overview</h1>
           <p className="muted">Redemptions, customer usage, and top businesses.</p>
         </div>
         <div className="filters">
