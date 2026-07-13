@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Image, ScrollView, Text, View } from 'react-native';
 import { Link } from 'expo-router';
-import { AppButton, Banner, Card, FieldInput, Pill, Screen, SectionTitle, Spinner } from '@/components/Ui';
+import { AppButton, Banner, BrandHeader, Card, FieldInput, Pill, Screen, SectionTitle, Spinner } from '@/components/Ui';
 import { listCards } from '@/lib/api';
 import { useOnboarding } from '@/lib/onboarding';
 import type { CardSummary, CardTheme } from '@/lib/types';
@@ -55,6 +55,7 @@ export default function BrowseScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={{ gap: 14, paddingBottom: 24 }}>
+        <BrandHeader subtitle="Browse cards" />
         <Card>
           <SectionTitle title="Browse cards" subtitle="Active cards and participating businesses." />
           {onboarding.selection.code ? (
