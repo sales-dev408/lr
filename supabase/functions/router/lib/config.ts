@@ -39,6 +39,16 @@ const envSchema = z.object({
   PLAY_STORE_URL: z.string().url().default('https://play.google.com/store'),
   ALLOWED_ORIGINS: z.string().trim().default(''),
   BLOCKED_IPS: z.string().trim().default(''),
+  ADDPASS_API_KEY: z.string().trim().default(''),
+  ADDPASS_BASE_URL: z.string().url().default('https://app.addpass.io/api/v1'),
+  SUPABASE_URL: z.string().trim().default(''),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().trim().default(''),
+  SUPABASE_STORAGE_BUCKET: z.string().trim().default('lr-assets'),
+  PUBLIC_API_BASE_URL: z.string().trim().default(''),
+  BRAND_NAME: z.string().trim().default('Light Rail Deals'),
+  WALLET_BACKGROUND_COLOR: z.string().trim().default('#0B1F3A'),
+  WALLET_FOREGROUND_COLOR: z.string().trim().default('#FFFFFF'),
+  WALLET_LABEL_COLOR: z.string().trim().default('#8FB2D9'),
 });
 
 const parsed = envSchema.parse(Deno.env.toObject());
@@ -81,6 +91,16 @@ export const config = {
   playStoreUrl: parsed.PLAY_STORE_URL,
   allowedOrigins: parsed.ALLOWED_ORIGINS.split(',').map((item) => item.trim()).filter(Boolean),
   blockedIps: parsed.BLOCKED_IPS.split(',').map((item) => item.trim()).filter(Boolean),
+  addpassApiKey: parsed.ADDPASS_API_KEY,
+  addpassBaseUrl: parsed.ADDPASS_BASE_URL.replace(/\/$/, ''),
+  supabaseUrl: parsed.SUPABASE_URL.replace(/\/$/, ''),
+  supabaseServiceRoleKey: parsed.SUPABASE_SERVICE_ROLE_KEY,
+  storageBucket: parsed.SUPABASE_STORAGE_BUCKET,
+  publicApiBaseUrl: parsed.PUBLIC_API_BASE_URL.replace(/\/$/, ''),
+  brandName: parsed.BRAND_NAME,
+  walletBackgroundColor: parsed.WALLET_BACKGROUND_COLOR,
+  walletForegroundColor: parsed.WALLET_FOREGROUND_COLOR,
+  walletLabelColor: parsed.WALLET_LABEL_COLOR,
 } as const;
 
 export type AppConfig = typeof config;

@@ -3,25 +3,16 @@ import bcrypt from 'npm:bcryptjs';
 import QRCode from 'npm:qrcode';
 import { config } from './lib/config.ts';
 import { authenticate, requireRole } from './lib/auth.ts';
-import { verifyCaptcha } from './lib/captcha.ts';
 import { dbQuery, withDbClient } from './lib/db.ts';
-import { getAdminAnalytics, getVendorAnalytics } from './lib/analytics.ts';
+import { getAdminAnalytics } from './lib/analytics.ts';
 import { buildLookupDiscountView } from './lib/discounts.ts';
-import { generateOpaqueToken, generateTempPassword } from './lib/ids.ts';
+import { generateOpaqueToken } from './lib/ids.ts';
 import { resolvePassLookup, resolveCardLookup } from './lib/lookup.ts';
 import { redeemDiscount } from './lib/redeem.ts';
-import { buildApplePassPackage, buildGoogleWalletLink } from './lib/wallet.ts';
-import {
-  connectVendorPosProvider,
-  deleteDiscountFromVendorConnections,
-  disconnectVendorPosProvider,
-  finalizePosConnection,
-  getPosConnectionByProvider,
-  getPosConnectionSummary,
-  syncConnectionDiscountsByProvider,
-  syncDiscountToVendorConnections,
-} from './lib/pos.ts';
-import { writeTransactionAudit } from './lib/audit.ts';
+import { buildApplePassPackage, buildGoogleWalletLink, buildAddpassPayload, buildPkpassDownloadUrl, buildWalletEmbedHtml } from './lib/wallet.ts';
+import { addpassConfigured, streamPkPass } from './lib/addpass.ts';
+import { createVendorWithDiscount } from './lib/vendors.ts';
+import { humanDiscountLabel } from './lib/codes.ts';
 
 const customerRegisterSchema = z.object({
   email: z.string().email().optional(),
@@ -30,14 +21,12 @@ const customerRegisterSchema = z.object({
   fullName: z.string().min(1).default('Customer'),
   socialProvider: z.string().min(1).optional(),
   socialId: z.string().min(1).optional(),
-  captchaToken: z.string().optional(),
 });
 
 const customerLoginSchema = z.object({
   email: z.string().email().optional(),
   phone: z.string().min(7).optional(),
   password: z.string().min(1),
-  captchaToken: z.string().optional(),
 });
 
 const socialSchema = z
@@ -50,16 +39,9 @@ const socialSchema = z
   })
   .refine((value) => Boolean(value.token || value.idToken), { message: 'token or idToken is required' });
 
-const vendorLoginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
-  captchaToken: z.string().optional(),
-});
-
 const adminLoginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
-  captchaToken: z.string().optional(),
 });
 
 const cardSchema = z.object({
@@ -72,15 +54,29 @@ const cardSchema = z.object({
   status: z.enum(['draft', 'active', 'archived']).optional(),
 });
 
-const vendorSchema = z.object({
+const adminVendorCreateSchema = z.object({
   name: z.string().min(1),
-  location: z.string().optional(),
-  city: z.string().optional(),
-  category: z.string().optional(),
-  posType: z.enum(['square', 'stripe', 'clover', 'toast', 'other']),
-  email: z.string().email(),
-  password: z.string().min(8).optional(),
+  address: z.string().optional(),
+  category: z.enum(['Sports', 'Dining', 'Entertainment']),
+  posSystem: z.string().optional(),
+  discountType: z.enum(['fixed', 'percent', 'bogo']).default('percent'),
+  discountValue: z.number().positive(),
+  iconDataUrl: z.string().optional(),
+  logoDataUrl: z.string().optional(),
+});
+
+const adminVendorUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  address: z.string().optional(),
+  category: z.enum(['Sports', 'Dining', 'Entertainment']).optional(),
+  posSystem: z.string().optional(),
   status: z.enum(['pending', 'approved', 'rejected', 'suspended']).optional(),
+});
+
+const adminSettingsSchema = z.object({
+  email: z.string().email().optional(),
+  password: z.string().min(8).optional(),
+  location: z.string().optional(),
 });
 
 const discountSchema = z.object({
@@ -94,8 +90,6 @@ const discountSchema = z.object({
   cityOverrides: z.record(z.string(), z.object({ type: z.enum(['fixed', 'percent', 'bogo']).optional(), value: z.number().optional() })).default({}),
   active: z.boolean().default(true),
 });
-
-const providerSchema = z.enum(['square', 'clover', 'toast', 'stripe']);
 
 function corsOrigin(request: Request): string {
   const origin = request.headers.get('origin');
@@ -251,14 +245,6 @@ async function loadCardsWithBusinesses(filters: { id?: string; theme?: string; s
   }));
 }
 
-function portalRedirect(params: Record<string, string>): string {
-  const url = new URL(config.vendorPortalUrl.replace(/\/$/, '') + '/pos-integration');
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, value);
-  }
-  return url.toString();
-}
-
 function notFound(request: Request): Response {
   return json(request, { error: 'Not found' }, { status: 404 });
 }
@@ -266,17 +252,25 @@ function notFound(request: Request): Response {
 Deno.serve(async (request) => {
   const url = new URL(request.url);
 
-  // Default route = the actual request path
-  let path = url.pathname;
-
-  // Compatibility: support callers hitting:
-  //   /functions/v1/router/auth/admin/login
-  // by rewriting to your internal routes:
-  //   /api/auth/admin/login
-  const m = path.match(/^\/functions\/v1\/router\/(.+)$/);
-  if (m) {
-    path = `/api/${m[1]}`;
+  // Normalize the request path to the internal /api/* contract regardless of how
+  // the Edge Function is invoked. Supabase serves it under
+  //   /functions/v1/router/...   (local / direct)
+  //   /router/...                (production gateway strips /functions/v1)
+  // and clients may or may not include the /api prefix. All of these resolve to
+  // the same internal routes, which is what eliminates the 404/Not Found errors.
+  let path = url.pathname
+    .replace(/^\/functions\/v1\/router(?=\/|$)/, '')
+    .replace(/^\/router(?=\/|$)/, '');
+  if (path === '' || path === '/') {
+    path = '/';
+  } else {
+    if (!path.startsWith('/')) path = `/${path}`;
+    if (path !== '/api' && !path.startsWith('/api/')) {
+      path = `/api${path}`;
+    }
   }
+
+  const baseUrl = config.publicApiBaseUrl || `${url.origin}/functions/v1/router`;
 
   if (request.method === 'OPTIONS') {
     return new Response(null, {
@@ -314,7 +308,6 @@ Deno.serve(async (request) => {
 
     if (path === '/api/auth/register' && request.method === 'POST') {
       const body = customerRegisterSchema.parse(await readJsonBody(request, {}));
-      if (!(await verifyCaptcha(body.captchaToken))) return json(request, { error: 'CAPTCHA failed' }, { status: 400 });
       if (!body.email && !body.phone && !body.socialProvider) return json(request, { error: 'Email, phone, or social login is required' }, { status: 400 });
       const passwordHash = await bcrypt.hash(body.password, 10);
       const rows = await withDbClient(async (client) => {
@@ -338,7 +331,6 @@ Deno.serve(async (request) => {
 
     if (path === '/api/auth/login' && request.method === 'POST') {
       const body = customerLoginSchema.parse(await readJsonBody(request, {}));
-      if (!(await verifyCaptcha(body.captchaToken))) return json(request, { error: 'CAPTCHA failed' }, { status: 400 });
       const rows = await dbQuery<{ id: string; email: string | null; password_hash: string | null }>(
         'SELECT id, email::text AS email, password_hash FROM users WHERE (email::text = $1 OR phone = $2) LIMIT 1',
         [body.email ?? null, body.phone ?? null],
@@ -383,35 +375,8 @@ Deno.serve(async (request) => {
       return json(request, { token, expiresIn: '7d', profile });
     }
 
-    if (path === '/api/auth/vendor/login' && request.method === 'POST') {
-      const body = vendorLoginSchema.parse(await readJsonBody(request, {}));
-      if (!(await verifyCaptcha(body.captchaToken))) return json(request, { error: 'CAPTCHA failed' }, { status: 400 });
-      const rows = await dbQuery<{ id: string; email: string; password_hash: string; status: string; name: string; location: string | null; city: string | null; category: string | null; pos_type: string }>(
-        'SELECT * FROM vendors WHERE email::text = $1 LIMIT 1',
-        [body.email],
-      );
-      const vendor = rows[0];
-      if (!vendor || !(await bcrypt.compare(body.password, vendor.password_hash))) return json(request, { error: 'Invalid credentials' }, { status: 401 });
-      const token = await issueToken('vendor', vendor.id, vendor.email);
-      return json(request, {
-        token,
-        expiresIn: '7d',
-        profile: {
-          id: vendor.id,
-          email: vendor.email,
-          name: vendor.name,
-          location: vendor.location,
-          city: vendor.city,
-          category: vendor.category,
-          posType: vendor.pos_type,
-          status: vendor.status,
-        },
-      });
-    }
-
     if (path === '/api/auth/admin/login' && request.method === 'POST') {
       const body = adminLoginSchema.parse(await readJsonBody(request, {}));
-      if (!(await verifyCaptcha(body.captchaToken))) return json(request, { error: 'CAPTCHA failed' }, { status: 400 });
       const rows = await dbQuery<{ id: string; email: string; password_hash: string; role: string }>('SELECT id, email::text AS email, password_hash, role FROM admins WHERE email::text = $1 LIMIT 1', [
         body.email,
       ]);
@@ -431,6 +396,59 @@ Deno.serve(async (request) => {
       if (cards.length === 0) return json(request, { error: 'Card not found' }, { status: 404 });
       const vendors = await dbQuery(`SELECT v.id, v.name, v.city, d.* FROM card_vendors cv JOIN vendors v ON v.id = cv.vendor_id LEFT JOIN discounts d ON d.card_id = cv.card_id AND d.vendor_id = cv.vendor_id WHERE cv.card_id = $1`, [id]);
       return json(request, { ...(cards[0] as Record<string, unknown>), participatingBusinesses: vendors });
+    }
+
+    // Public, customer-facing vendor directory for the mobile app. The raw
+    // discount code is intentionally NOT included — customers only ever see the
+    // barcode inside the Apple Wallet pass they add via `walletUrl`.
+    if ((path === '/api/vendors' || /^\/api\/vendors\/[^/]+$/.test(path)) && request.method === 'GET') {
+      const single = path !== '/api/vendors';
+      const vendorId = single ? path.split('/').pop()! : null;
+      const rows = await dbQuery<{
+        id: string;
+        name: string;
+        address: string | null;
+        location: string | null;
+        category: string | null;
+        pos_system: string | null;
+        icon_url: string | null;
+        logo_url: string | null;
+        card_id: string;
+        discount_type: 'fixed' | 'percent' | 'bogo';
+        discount_value: string;
+        card_icon: string | null;
+        card_logo: string | null;
+      }>(
+        `SELECT v.id, v.name, v.address, v.location, v.category, v.pos_system, v.icon_url, v.logo_url,
+                c.id AS card_id, c.discount_type, c.discount_value, c.icon_url AS card_icon, c.logo_url AS card_logo
+         FROM vendors v
+         JOIN card_vendors cv ON cv.vendor_id = v.id
+         JOIN cards c ON c.id = cv.card_id AND c.status = 'active' AND c.discount_code IS NOT NULL
+         WHERE v.status = 'approved' AND ($1::uuid IS NULL OR v.id = $1::uuid)
+         ORDER BY v.name`,
+        [vendorId],
+      );
+      const items = rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        address: row.address ?? row.location,
+        category: row.category,
+        posSystem: row.pos_system,
+        iconUrl: row.icon_url ?? row.card_icon,
+        logoUrl: row.logo_url ?? row.card_logo,
+        discount: {
+          type: row.discount_type,
+          value: Number(row.discount_value),
+          label: humanDiscountLabel(row.discount_type, Number(row.discount_value)),
+        },
+        cardId: row.card_id,
+        walletUrl: buildPkpassDownloadUrl(baseUrl, row.card_id),
+      }));
+      if (single) {
+        if (items.length === 0) return json(request, { error: 'Vendor not found' }, { status: 404 });
+        return json(request, items[0]);
+      }
+      return json(request, items);
     }
 
     if (path === '/api/admin/cards' && request.method === 'GET') {
@@ -453,6 +471,24 @@ Deno.serve(async (request) => {
       const q = queryObject(url);
       return json(request, await getAdminAnalytics({ ...(q.from ? { from: q.from } : {}), ...(q.to ? { to: q.to } : {}), ...(q.city ? { city: q.city } : {}) }));
     }
+    if (path === '/api/admin/settings' && request.method === 'GET') {
+      const auth = requireRole(request, ['admin']);
+      if (auth instanceof Response) return auth;
+      const rows = await dbQuery('SELECT id, email::text AS email, role, location FROM admins WHERE id = $1 LIMIT 1', [auth.sub]);
+      if (!rows[0]) return json(request, { error: 'Not found' }, { status: 404 });
+      return json(request, rows[0]);
+    }
+    if (path === '/api/admin/settings' && request.method === 'PATCH') {
+      const auth = requireRole(request, ['admin']);
+      if (auth instanceof Response) return auth;
+      const body = adminSettingsSchema.parse(await readJsonBody(request, {}));
+      const passwordHash = body.password ? await bcrypt.hash(body.password, 10) : null;
+      const rows = await dbQuery(
+        `UPDATE admins SET email = COALESCE($2, email), password_hash = COALESCE($3, password_hash), location = COALESCE($4, location), updated_at = now() WHERE id = $1 RETURNING id, email::text AS email, role, location`,
+        [auth.sub, body.email ?? null, passwordHash, body.location ?? null],
+      );
+      return json(request, rows[0] ?? {});
+    }
     if (path === '/api/admin/vendors' && request.method === 'GET') {
       const auth = requireRole(request, ['admin']);
       if (auth instanceof Response) return auth;
@@ -466,32 +502,52 @@ Deno.serve(async (request) => {
     if (path === '/api/admin/vendors' && request.method === 'POST') {
       const auth = requireRole(request, ['admin']);
       if (auth instanceof Response) return auth;
-      const body = vendorSchema.parse(await readJsonBody(request, {}));
-      const password = body.password ?? generateTempPassword();
-      const hash = await bcrypt.hash(password, 10);
-      const rows = await dbQuery<{ id: string }>(`INSERT INTO vendors (name, location, city, category, pos_type, email, password_hash, status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`, [
-        body.name,
-        body.location ?? null,
-        body.city ?? null,
-        body.category ?? null,
-        body.posType,
-        body.email,
-        hash,
-        body.status ?? 'pending',
-      ]);
-      await writeTransactionAudit({ actorType: 'admin', actorId: auth.sub, action: 'admin.vendor.create', entityType: 'vendor', entityId: rows[0]!.id, metadata: { name: body.name, email: body.email }, ip: getIp(request) });
-      return json(request, { id: rows[0]!.id, tempPassword: password }, { status: 201 });
+      const body = adminVendorCreateSchema.parse(await readJsonBody(request, {}));
+      const result = await createVendorWithDiscount(
+        {
+          name: body.name,
+          address: body.address ?? null,
+          category: body.category,
+          posSystem: body.posSystem ?? null,
+          discountType: body.discountType,
+          discountValue: body.discountValue,
+          iconDataUrl: body.iconDataUrl ?? null,
+          logoDataUrl: body.logoDataUrl ?? null,
+        },
+        baseUrl,
+      );
+      return json(request, result, { status: 201 });
     }
     if (/^\/api\/admin\/vendors\/[^/]+$/.test(path) && request.method === 'PATCH') {
       const auth = requireRole(request, ['admin']);
       if (auth instanceof Response) return auth;
       const id = path.split('/').pop()!;
-      const body = vendorSchema.partial().parse(await readJsonBody(request, {}));
+      const body = adminVendorUpdateSchema.parse(await readJsonBody(request, {}));
       const rows = await dbQuery(
-        `UPDATE vendors SET name = COALESCE($2, name), location = COALESCE($3, location), city = COALESCE($4, city), category = COALESCE($5, category), pos_type = COALESCE($6, pos_type), email = COALESCE($7, email), status = COALESCE($8, status), updated_at = now() WHERE id = $1 RETURNING *`,
-        [id, body.name ?? null, body.location ?? null, body.city ?? null, body.category ?? null, body.posType ?? null, body.email ?? null, body.status ?? null],
+        `UPDATE vendors SET name = COALESCE($2, name), location = COALESCE($3, location), address = COALESCE($3, address), category = COALESCE($4, category), pos_system = COALESCE($5, pos_system), status = COALESCE($6, status), updated_at = now() WHERE id = $1 RETURNING *`,
+        [id, body.name ?? null, body.address ?? null, body.category ?? null, body.posSystem ?? null, body.status ?? null],
       );
       return json(request, rows[0] ?? {});
+    }
+    if (/^\/api\/admin\/vendors\/[^/]+\/pass$/.test(path) && request.method === 'GET') {
+      const auth = requireRole(request, ['admin']);
+      if (auth instanceof Response) return auth;
+      const id = path.split('/').slice(-2)[0]!;
+      const rows = await dbQuery<{ card_id: string; card_name: string; discount_type: string; discount_value: string; discount_code: string; pkpass_url: string | null; pos_system: string | null }>(
+        `SELECT c.id AS card_id, c.name AS card_name, c.discount_type, c.discount_value, c.discount_code, c.pkpass_url, v.pos_system
+         FROM card_vendors cv JOIN cards c ON c.id = cv.card_id JOIN vendors v ON v.id = cv.vendor_id
+         WHERE cv.vendor_id = $1 AND c.discount_code IS NOT NULL ORDER BY c.created_at DESC LIMIT 1`,
+        [id],
+      );
+      const row = rows[0];
+      if (!row) return json(request, { error: 'No discount pass for this vendor' }, { status: 404 });
+      const downloadUrl = buildPkpassDownloadUrl(baseUrl, row.card_id);
+      return json(request, {
+        discountCode: row.discount_code,
+        card: { id: row.card_id, name: row.card_name, pkpassHostedUrl: row.pkpass_url },
+        wallet: { downloadUrl, embedHtml: buildWalletEmbedHtml(downloadUrl, row.card_name) },
+        posInstructions: `Scan the barcode or manually enter code ${row.discount_code} in your POS${row.pos_system ? ` (${row.pos_system})` : ''}. No NFC required.`,
+      });
     }
     if (/^\/api\/admin\/vendors\/[^/]+\/approve$/.test(path) && request.method === 'POST') {
       const auth = requireRole(request, ['admin']);
@@ -504,15 +560,6 @@ Deno.serve(async (request) => {
       if (auth instanceof Response) return auth;
       const id = path.split('/').slice(-2)[0]!;
       return json(request, await dbQuery('UPDATE vendors SET status = \'rejected\', updated_at = now() WHERE id = $1 RETURNING *', [id]));
-    }
-    if (/^\/api\/admin\/vendors\/[^/]+\/reset-password$/.test(path) && request.method === 'POST') {
-      const auth = requireRole(request, ['admin']);
-      if (auth instanceof Response) return auth;
-      const id = path.split('/').slice(-2)[0]!;
-      const tempPassword = generateTempPassword();
-      const hash = await bcrypt.hash(tempPassword, 10);
-      await dbQuery('UPDATE vendors SET password_hash = $2, updated_at = now() WHERE id = $1', [id, hash]);
-      return json(request, { tempPassword });
     }
     if (/^\/api\/admin\/vendors\/[^/]+\/activity$/.test(path) && request.method === 'GET') {
       const auth = requireRole(request, ['admin']);
@@ -573,7 +620,6 @@ Deno.serve(async (request) => {
         `INSERT INTO discounts (card_id, vendor_id, type, value, min_purchase, max_uses_total, max_uses_per_customer, city_overrides, active) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9) RETURNING id`,
         [body.cardId, body.vendorId, body.type, body.value, body.minPurchase, body.maxUsesTotal ?? null, body.maxUsesPerCustomer ?? null, JSON.stringify(body.cityOverrides), body.active],
       );
-      void syncDiscountToVendorConnections({ discountId: rows[0]!.id, action: 'upsert' }).catch(() => {});
       return json(request, { id: rows[0]!.id }, { status: 201 });
     }
     if (/^\/api\/admin\/discounts\/[^/]+$/.test(path) && request.method === 'PATCH') {
@@ -585,162 +631,37 @@ Deno.serve(async (request) => {
         `UPDATE discounts SET card_id = COALESCE($2, card_id), vendor_id = COALESCE($3, vendor_id), type = COALESCE($4, type), value = COALESCE($5, value), min_purchase = COALESCE($6, min_purchase), max_uses_total = COALESCE($7, max_uses_total), max_uses_per_customer = COALESCE($8, max_uses_per_customer), city_overrides = COALESCE($9::jsonb, city_overrides), active = COALESCE($10, active), updated_at = now() WHERE id = $1 RETURNING *`,
         [id, body.cardId ?? null, body.vendorId ?? null, body.type ?? null, body.value ?? null, body.minPurchase ?? null, body.maxUsesTotal ?? null, body.maxUsesPerCustomer ?? null, body.cityOverrides ? JSON.stringify(body.cityOverrides) : null, body.active ?? null],
       );
-      void syncDiscountToVendorConnections({ discountId: id, action: 'upsert' }).catch(() => {});
       return json(request, rows[0] ?? {});
     }
     if (/^\/api\/admin\/discounts\/[^/]+$/.test(path) && request.method === 'DELETE') {
       const auth = requireRole(request, ['admin']);
       if (auth instanceof Response) return auth;
       const id = path.split('/').pop()!;
-      void deleteDiscountFromVendorConnections({ discountId: id }).catch(() => {});
       return json(request, await dbQuery('DELETE FROM discounts WHERE id = $1 RETURNING id', [id]));
     }
 
-    if (path === '/api/vendor/register' && request.method === 'POST') {
-      const body = z.object({ name: z.string().min(1), location: z.string().optional(), city: z.string().optional(), category: z.string().optional(), posType: z.enum(['square', 'stripe', 'clover', 'toast', 'other']), email: z.string().email(), password: z.string().min(8) }).parse(await readJsonBody(request, {}));
-      const hash = await bcrypt.hash(body.password, 10);
-      const rows = await dbQuery<{ id: string }>(`INSERT INTO vendors (name, location, city, category, pos_type, email, password_hash, status) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending') RETURNING id`, [
-        body.name,
-        body.location ?? null,
-        body.city ?? null,
-        body.category ?? null,
-        body.posType,
-        body.email,
-        hash,
-      ]);
-      return json(request, { id: rows[0]!.id, status: 'pending' }, { status: 201 });
-    }
-    if (path === '/api/vendor/cards' && request.method === 'GET') {
-      const auth = requireRole(request, ['vendor']);
-      if (auth instanceof Response) return auth;
-      const vendorId = auth.sub;
-      const rows = await dbQuery<{
-        id: string;
-        name: string;
-        theme: string;
-        description: string | null;
-        image_url: string | null;
-        expiration_date: string | null;
-        max_uses: number | null;
-        status: string;
-        discount_id: string | null;
-        discount_type: 'fixed' | 'percent' | 'bogo' | null;
-        discount_value: string | null;
-        min_purchase: string | null;
-        max_uses_total: number | null;
-        max_uses_per_customer: number | null;
-        uses_count: number | null;
-        city_overrides: Record<string, { type?: 'fixed' | 'percent' | 'bogo'; value?: number }> | null;
-        active: boolean | null;
-      }>(
-        `SELECT c.id, c.name, c.theme, c.description, c.image_url, c.expiration_date, c.max_uses, c.status, d.id AS discount_id, d.type AS discount_type, d.value AS discount_value, d.min_purchase, d.max_uses_total, d.max_uses_per_customer, d.uses_count, d.city_overrides, d.active FROM card_vendors cv JOIN cards c ON c.id = cv.card_id LEFT JOIN discounts d ON d.card_id = cv.card_id AND d.vendor_id = cv.vendor_id WHERE cv.vendor_id = $1 ORDER BY c.created_at DESC`,
-        [vendorId],
+    // Streams the .pkpass for a discount tier so the mobile app / website can
+    // offer a stable "Add to Apple Wallet" link. The barcode inside always
+    // encodes the tier's discount code (never shown to the customer directly).
+    if (/^\/api\/passes\/card\/[^/]+\/pkpass$/.test(path) && request.method === 'GET') {
+      const cardId = path.split('/').slice(-2)[0]!;
+      const rows = await dbQuery<{ id: string; name: string; discount_type: 'fixed' | 'percent' | 'bogo'; discount_value: string; discount_code: string; icon_url: string | null; logo_url: string | null }>(
+        `SELECT id, name, discount_type, discount_value, discount_code, icon_url, logo_url FROM cards WHERE id = $1 AND discount_code IS NOT NULL LIMIT 1`,
+        [cardId],
       );
-      return json(
-        request,
-        rows.map((card) => ({
-          id: card.id,
-          name: card.name,
-          theme: card.theme,
-          description: card.description,
-          image_url: card.image_url,
-          expiration_date: card.expiration_date,
-          max_uses: card.max_uses,
-          status: card.status,
-          discount:
-            card.discount_id && card.discount_type && card.discount_value !== null && card.min_purchase !== null
-              ? buildLookupDiscountView(
-                  {
-                    id: card.discount_id,
-                    card_id: card.id,
-                    vendor_id: vendorId,
-                    type: card.discount_type,
-                    value: card.discount_value,
-                    min_purchase: card.min_purchase,
-                    max_uses_total: card.max_uses_total,
-                    max_uses_per_customer: card.max_uses_per_customer,
-                    uses_count: card.uses_count ?? 0,
-                    city_overrides: card.city_overrides,
-                    active: Boolean(card.active),
-                  },
-                  null,
-                )
-              : null,
-        })),
+      const card = rows[0];
+      if (!card) return json(request, { error: 'Pass not found' }, { status: 404 });
+      if (!addpassConfigured()) return json(request, { error: 'Apple Wallet pass generation is not configured' }, { status: 503 });
+      const bytes = await streamPkPass(
+        buildAddpassPayload({ id: card.id, name: card.name, discountType: card.discount_type, discountValue: Number(card.discount_value), discountCode: card.discount_code, iconUrl: card.icon_url, logoUrl: card.logo_url }),
       );
-    }
-    if (path === '/api/vendor/analytics' && request.method === 'GET') {
-      const auth = requireRole(request, ['vendor']);
-      if (auth instanceof Response) return auth;
-      return json(request, await getVendorAnalytics(auth.sub));
-    }
-    if (/^\/api\/vendor\/discounts\/[^/]+$/.test(path) && request.method === 'PATCH') {
-      const auth = requireRole(request, ['vendor']);
-      if (auth instanceof Response) return auth;
-      const id = path.split('/').pop()!;
-      const body = z
-        .object({
-          type: z.enum(['fixed', 'percent', 'bogo']).optional(),
-          value: z.number().optional(),
-          minPurchase: z.number().optional(),
-          maxUsesPerCustomer: z.number().int().positive().optional(),
-          active: z.boolean().optional(),
-          cityOverrides: z.record(z.string(), z.object({ type: z.enum(['fixed', 'percent', 'bogo']).optional(), value: z.number().optional() })).optional(),
-        })
-        .parse(await readJsonBody(request, {}));
-      const ownership = await dbQuery<{ vendor_id: string }>('SELECT vendor_id FROM discounts WHERE id = $1 LIMIT 1', [id]);
-      if (!ownership[0] || ownership[0].vendor_id !== auth.sub) return json(request, { error: 'Forbidden' }, { status: 403 });
-      const rows = await dbQuery(
-        `UPDATE discounts SET type = COALESCE($2, type), value = COALESCE($3, value), min_purchase = COALESCE($4, min_purchase), max_uses_per_customer = COALESCE($5, max_uses_per_customer), active = COALESCE($6, active), city_overrides = COALESCE($7::jsonb, city_overrides), updated_at = now() WHERE id = $1 RETURNING *`,
-        [id, body.type ?? null, body.value ?? null, body.minPurchase ?? null, body.maxUsesPerCustomer ?? null, body.active ?? null, body.cityOverrides ? JSON.stringify(body.cityOverrides) : null],
-      );
-      void syncDiscountToVendorConnections({ discountId: id, action: 'upsert' }).catch(() => {});
-      return json(request, rows[0] ?? {});
-    }
-
-    if (path === '/api/vendor/pos/connections' && request.method === 'GET') {
-      const auth = requireRole(request, ['vendor']);
-      if (auth instanceof Response) return auth;
-      return json(request, await getPosConnectionSummary(auth.sub));
-    }
-    if (/^\/api\/vendor\/pos\/connections\/[^/]+\/connect$/.test(path) && request.method === 'POST') {
-      const auth = requireRole(request, ['vendor']);
-      if (auth instanceof Response) return auth;
-      const provider = providerSchema.parse(path.split('/').slice(-2)[0]);
-      const result = await connectVendorPosProvider({ vendorId: auth.sub, provider });
-      await writeTransactionAudit({ actorType: 'vendor', actorId: auth.sub, action: `pos.${provider}.connect`, entityType: 'pos_connection', entityId: result.connection.id, metadata: { provider, mode: result.mode, status: result.connection.status }, ip: getIp(request) });
-      return json(request, { provider, mode: result.mode, status: result.connection.status, ...(result.authorizeUrl ? { authorizeUrl: result.authorizeUrl, state: result.state } : {}), connection: result.connection, message: result.message });
-    }
-    if (/^\/api\/vendor\/pos\/connections\/[^/]+$/.test(path) && request.method === 'DELETE') {
-      const auth = requireRole(request, ['vendor']);
-      if (auth instanceof Response) return auth;
-      const provider = providerSchema.parse(path.split('/').pop());
-      const connection = await disconnectVendorPosProvider({ vendorId: auth.sub, provider });
-      if (!connection) return json(request, { error: 'POS connection not found' }, { status: 404 });
-      await writeTransactionAudit({ actorType: 'vendor', actorId: auth.sub, action: `pos.${provider}.disconnect`, entityType: 'pos_connection', entityId: connection.id, metadata: { provider, status: connection.status }, ip: getIp(request) });
-      return json(request, connection);
-    }
-    if (/^\/api\/vendor\/pos\/connections\/[^/]+\/sync$/.test(path) && request.method === 'POST') {
-      const auth = requireRole(request, ['vendor']);
-      if (auth instanceof Response) return auth;
-      const provider = providerSchema.parse(path.split('/').slice(-2)[0]);
-      const connection = await getPosConnectionByProvider(auth.sub, provider);
-      if (!connection || connection.status !== 'connected') return json(request, { error: 'POS connection not found or not connected' }, { status: 404 });
-      const results = await syncConnectionDiscountsByProvider({ vendorId: auth.sub, provider });
-      await writeTransactionAudit({ actorType: 'vendor', actorId: auth.sub, action: `pos.${provider}.sync`, entityType: 'pos_connection', entityId: connection.id, metadata: { provider, synced: results.length }, ip: getIp(request) });
-      return json(request, { provider, synced: results.length, results, status: connection.status });
-    }
-    if (path === '/api/pos/oauth/callback' && request.method === 'GET') {
-      const q = queryObject(url);
-      if (q.error) return Response.redirect(portalRedirect({ pos: 'error', message: q.error_description ?? q.error }), 302);
-      if (!q.code) return Response.redirect(portalRedirect({ pos: 'error', message: 'Missing authorization code' }), 302);
-      try {
-        const result = await finalizePosConnection({ stateToken: q.state ?? '', code: q.code });
-        await writeTransactionAudit({ actorType: 'vendor', actorId: result.vendorId, action: `pos.${result.provider}.callback`, entityType: 'pos_connection', entityId: result.connection.id, metadata: { provider: result.provider, mode: result.mode, status: result.connection.status }, ip: getIp(request) });
-        return Response.redirect(portalRedirect({ pos: 'connected', provider: result.provider, mode: result.mode }), 302);
-      } catch (error) {
-        return Response.redirect(portalRedirect({ pos: 'error', message: error instanceof Error ? error.message : 'POS callback failed' }), 302);
-      }
+      return new Response(bytes, {
+        headers: {
+          'Content-Type': 'application/vnd.apple.pkpass',
+          'Content-Disposition': `attachment; filename="${card.discount_code}.pkpass"`,
+          'Access-Control-Allow-Origin': corsOrigin(request),
+        },
+      });
     }
 
     if (path === '/api/passes' && request.method === 'POST') {

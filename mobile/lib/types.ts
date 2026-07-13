@@ -66,6 +66,19 @@ export interface CardSummary {
 
 export type CardDetail = CardSummary;
 
+export interface VendorListItem {
+  id: string;
+  name: string;
+  address: string | null;
+  category: string | null;
+  posSystem: string | null;
+  iconUrl: string | null;
+  logoUrl: string | null;
+  discount: { type: DiscountType; value: number; label: string };
+  cardId: string;
+  walletUrl: string;
+}
+
 export interface WalletPassMetadata {
   passId: string;
   serialNumber: string;

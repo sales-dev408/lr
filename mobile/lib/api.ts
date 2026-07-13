@@ -14,6 +14,7 @@ import type {
   PassDetail,
   RedeemResult,
   UserProfile,
+  VendorListItem,
   WalletPlatform,
 } from './types';
 import { getItem } from './storage';
@@ -182,12 +183,42 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   return (await response.json()) as T;
 }
 
-export async function login(body: { email?: string; phone?: string; password: string; captchaToken?: string }) {
+export async function login(body: { email?: string; phone?: string; password: string }) {
   return apiRequest<AuthResponse<UserProfile>>('/auth/login', { method: 'POST', body: JSON.stringify(body) });
 }
 
-export async function register(body: { email?: string; phone?: string; password: string; fullName: string; social?: string; captchaToken?: string }) {
+export async function register(body: { email?: string; phone?: string; password: string; fullName: string; social?: string }) {
   return apiRequest<AuthResponse<UserProfile>>('/auth/register', { method: 'POST', body: JSON.stringify(body) });
+}
+
+function normalizeVendor(input: Record<string, unknown>): VendorListItem {
+  const discount = isRecord(input.discount) ? input.discount : {};
+  return {
+    id: String(input.id),
+    name: String(input.name),
+    address: (input.address as string | null | undefined) ?? null,
+    category: (input.category as string | null | undefined) ?? null,
+    posSystem: (input.posSystem as string | null | undefined) ?? null,
+    iconUrl: (input.iconUrl as string | null | undefined) ?? null,
+    logoUrl: (input.logoUrl as string | null | undefined) ?? null,
+    discount: {
+      type: normalizeDiscountType(discount.type),
+      value: toNumber(discount.value),
+      label: String(discount.label ?? ''),
+    },
+    cardId: String(input.cardId ?? ''),
+    walletUrl: String(input.walletUrl ?? ''),
+  };
+}
+
+export async function listVendors(params: { category?: string } = {}) {
+  const query = new URLSearchParams();
+  if (params.category) {
+    query.set('category', params.category);
+  }
+  const queryString = query.toString();
+  const vendors = await apiRequest<Record<string, unknown>[]>(`/vendors${queryString ? `?${queryString}` : ''}`);
+  return vendors.map(normalizeVendor);
 }
 
 export async function socialLogin(body: { provider: string; token: string; email?: string; fullName?: string }) {

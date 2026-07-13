@@ -1,11 +1,14 @@
 import type {
   AdminAnalyticsResponse,
   AdminProfile,
+  AdminSettings,
   AuthResponse,
   CardDetailResponse,
   CardSummary,
+  CreateVendorResult,
   DiscountSummary,
   VendorActivityRecord,
+  VendorPassResult,
   VendorRecord,
 } from './types';
 
@@ -198,12 +201,23 @@ function normalizeCard(input: Record<string, unknown>): CardSummary {
 export async function loginAdmin(body: {
   email: string;
   password: string;
-  captchaToken?: string;
 }): Promise<AuthResponse<AdminProfile>> {
   return apiRequest<AuthResponse<AdminProfile>>('/auth/admin/login', {
     method: 'POST',
     body: jsonBody(body),
   });
+}
+
+export async function getAdminSettings(): Promise<AdminSettings> {
+  return apiRequest<AdminSettings>('/admin/settings');
+}
+
+export async function updateAdminSettings(body: {
+  email?: string;
+  password?: string;
+  location?: string;
+}): Promise<AdminSettings> {
+  return apiRequest<AdminSettings>('/admin/settings', { method: 'PATCH', body: jsonBody(body) });
 }
 
 export async function getAdminAnalytics(params: { from?: string; to?: string; city?: string }): Promise<AdminAnalyticsResponse> {
@@ -216,31 +230,26 @@ export async function listAdminVendors(params: { status?: string; city?: string;
 
 export async function createAdminVendor(body: {
   name: string;
-  location?: string;
-  city?: string;
-  category?: string;
-  posType: string;
-  email: string;
-  password?: string;
-  status?: string;
-}): Promise<{ id: string; tempPassword: string }> {
+  address?: string;
+  category: 'Sports' | 'Dining' | 'Entertainment';
+  posSystem?: string;
+  discountType: 'fixed' | 'percent' | 'bogo';
+  discountValue: number;
+  iconDataUrl?: string;
+  logoDataUrl?: string;
+}): Promise<CreateVendorResult> {
   return apiRequest('/admin/vendors', { method: 'POST', body: jsonBody(body) });
 }
 
-export async function updateAdminVendor(id: string, body: Partial<VendorRecord & { posType: string }>): Promise<VendorRecord> {
+export async function updateAdminVendor(
+  id: string,
+  body: { name?: string; address?: string; category?: 'Sports' | 'Dining' | 'Entertainment'; posSystem?: string; status?: string },
+): Promise<VendorRecord> {
   return apiRequest(`/admin/vendors/${id}`, { method: 'PATCH', body: jsonBody(body) });
 }
 
-export async function approveVendor(id: string): Promise<VendorRecord[]> {
-  return apiRequest(`/admin/vendors/${id}/approve`, { method: 'POST' });
-}
-
-export async function rejectVendor(id: string): Promise<VendorRecord[]> {
-  return apiRequest(`/admin/vendors/${id}/reject`, { method: 'POST' });
-}
-
-export async function resetVendorPassword(id: string): Promise<{ tempPassword: string }> {
-  return apiRequest(`/admin/vendors/${id}/reset-password`, { method: 'POST' });
+export async function getVendorPass(id: string): Promise<VendorPassResult> {
+  return apiRequest(`/admin/vendors/${id}/pass`);
 }
 
 export async function getVendorActivity(id: string): Promise<VendorActivityRecord[]> {
