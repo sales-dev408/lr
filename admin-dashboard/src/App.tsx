@@ -5,6 +5,7 @@ import { AuditPage } from './pages/AuditPage';
 import { CardsPage } from './pages/CardsPage';
 import { LoginPage } from './pages/LoginPage';
 import { OverviewPage } from './pages/OverviewPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { VendorsPage } from './pages/VendorsPage';
 
 export function App() {
@@ -22,6 +23,7 @@ export function App() {
         <Route path="/vendors" element={<VendorsPage />} />
         <Route path="/cards" element={<CardsPage />} />
         <Route path="/audit" element={<AuditPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

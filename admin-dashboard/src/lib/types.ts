@@ -11,6 +11,30 @@ export interface AdminProfile {
   role: AdminRole;
 }
 
+export interface AdminSettings {
+  id: string;
+  email: string;
+  role: AdminRole;
+  location: string | null;
+}
+
+export type VendorCategory = 'Sports' | 'Dining' | 'Entertainment';
+
+export interface CreateVendorResult {
+  vendor: { id: string; name: string; address: string | null; category: string; posSystem: string | null };
+  discountCode: string;
+  card: { id: string; name: string; reused: boolean; pkpassHostedUrl: string | null; iconUrl: string | null; logoUrl: string | null };
+  wallet: { downloadUrl: string; embedHtml: string };
+  posInstructions: string;
+}
+
+export interface VendorPassResult {
+  discountCode: string;
+  card: { id: string; name: string; pkpassHostedUrl: string | null };
+  wallet: { downloadUrl: string; embedHtml: string };
+  posInstructions: string;
+}
+
 export interface AuthResponse<TProfile> {
   token: string;
   expiresIn?: string;
@@ -47,12 +71,15 @@ export interface VendorRecord {
   id: string;
   name: string;
   location: string | null;
+  address: string | null;
   city: string | null;
   category: string | null;
   pos_type: PosType;
-  email: string;
+  pos_system: string | null;
+  icon_url: string | null;
+  logo_url: string | null;
+  email: string | null;
   status: VendorStatus;
-  password_hash?: string;
   created_at?: string;
   updated_at?: string;
 }
