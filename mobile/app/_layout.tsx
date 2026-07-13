@@ -15,6 +15,7 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="card/[id]" />
           <Stack.Screen name="pass/[serial]" />
+          <Stack.Screen name="legal" />
         </Stack>
       </OnboardingProvider>
     </AuthProvider>

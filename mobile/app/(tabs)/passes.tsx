@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ScrollView, Text } from 'react-native';
 import { Link } from 'expo-router';
-import { AppButton, Banner, Card, Screen, SectionTitle, Spinner } from '@/components/Ui';
+import { AppButton, Banner, BrandHeader, Card, Screen, SectionTitle, Spinner } from '@/components/Ui';
 import { getPass } from '@/lib/api';
 import { loadStoredPasses } from '@/lib/passes';
 import type { PassDetail, StoredPass } from '@/lib/types';
@@ -67,6 +67,7 @@ export default function PassesScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={{ gap: 14, paddingBottom: 24 }}>
+        <BrandHeader subtitle="My passes" />
         <Card>
           <SectionTitle title="My passes" subtitle="Local pass list backed by the real pass detail endpoint where available." />
           <Banner tone="info">

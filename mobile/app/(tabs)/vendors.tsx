@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Image, Linking, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { AppButton, Banner, Card, Pill, Screen, SectionTitle, Spinner } from '@/components/Ui';
+import { AppButton, AppleTrademark, Banner, BrandHeader, Card, Pill, Screen, SectionTitle, Spinner } from '@/components/Ui';
 import { listVendors } from '@/lib/api';
 import type { VendorListItem } from '@/lib/types';
 
@@ -69,6 +69,7 @@ export default function VendorsScreen() {
         contentContainerStyle={{ gap: 14, paddingBottom: 24 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}
       >
+        <BrandHeader subtitle="Discounts along the line" />
         <Card>
           <SectionTitle title="Deals" subtitle="Pick a vendor to add its discount to Apple Wallet." />
           <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
@@ -113,10 +114,11 @@ export default function VendorsScreen() {
             <Pill tone="success">{selected.discount.label}</Pill>
             {selected.address ? <Text style={{ color: '#52617a' }}>{selected.address}</Text> : null}
             {selected.posSystem ? <Text style={{ color: '#52617a' }}>POS: {selected.posSystem}</Text> : null}
-            <AppButton onPress={() => void openWallet(selected)}> Add to Apple Wallet</AppButton>
+            <AppButton onPress={() => void openWallet(selected)}>Add to Apple Wallet</AppButton>
             <Text style={{ color: '#7c8a9d', fontSize: 12 }}>
               The barcode is shown in Apple Wallet. Present it at checkout for your discount.
             </Text>
+            <AppleTrademark />
           </Card>
         ) : null}
       </ScrollView>

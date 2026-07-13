@@ -3,6 +3,7 @@ import { createAdminVendor, getVendorPass, listAdminVendors, updateAdminVendor }
 import type { CreateVendorResult, VendorCategory, VendorPassResult, VendorRecord } from '../lib/types';
 import { Button, EmptyState, ErrorBanner, Modal, PageCard, Select, Input, Badge, SuccessBanner } from '../components/Ui';
 import { useAuth } from '../lib/auth';
+import { parseVendorFields, scanImageToText } from '../lib/ocr';
 
 const CATEGORIES: VendorCategory[] = ['Sports', 'Dining', 'Entertainment'];
 
@@ -38,6 +39,8 @@ export function VendorsPage() {
   const [creating, setCreating] = useState(false);
   const [result, setResult] = useState<CreateVendorResult | null>(null);
   const [passView, setPassView] = useState<{ vendor: VendorRecord; pass: VendorPassResult } | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanNote, setScanNote] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -69,6 +72,38 @@ export function VendorsPage() {
       setForm((prev) => ({ ...prev, [key]: dataUrl }));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to read image');
+    }
+  }
+
+  async function handleScan(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setScanning(true);
+    setScanNote(null);
+    setError(null);
+    try {
+      const text = await scanImageToText(file);
+      const fields = parseVendorFields(text);
+      const filled = Object.entries(fields).filter(([, v]) => v);
+      if (filled.length === 0) {
+        setScanNote('No fields detected — enter details manually.');
+        return;
+      }
+      setForm((prev) => ({
+        ...prev,
+        ...(fields.name ? { name: fields.name } : {}),
+        ...(fields.address ? { address: fields.address } : {}),
+        ...(fields.category ? { category: fields.category } : {}),
+        ...(fields.posSystem ? { posSystem: fields.posSystem } : {}),
+        ...(fields.discountKind ? { discountKind: fields.discountKind } : {}),
+        ...(fields.discountValue ? { discountValue: fields.discountValue } : {}),
+      }));
+      setScanNote(`Scanned ${filled.map(([k]) => k).join(', ')}. Review before creating.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Scan failed');
+    } finally {
+      setScanning(false);
     }
   }
 
@@ -160,6 +195,17 @@ export function VendorsPage() {
       <div className="grid-2">
         <PageCard title="Create vendor" subtitle={readOnly ? 'Read-only analyst mode' : 'Add a business and generate its discount pass.'}>
           <form className="form" onSubmit={submitCreate}>
+            <div className="scan-box">
+              <div>
+                <strong>Scan a flyer or business card</strong>
+                <p className="muted">Upload a photo and we&apos;ll auto-fill the fields below (OCR by Puter.js). Review before creating.</p>
+              </div>
+              <label className="btn btn-secondary scan-btn">
+                {scanning ? 'Scanning…' : 'Scan image'}
+                <input type="file" accept="image/*" disabled={readOnly || scanning} onChange={handleScan} hidden />
+              </label>
+            </div>
+            {scanNote ? <SuccessBanner message={scanNote} /> : null}
             <label>
               Vendor name
               <Input placeholder="Vendor name" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} required />
@@ -260,6 +306,9 @@ export function VendorsPage() {
               <p className="muted">Merchant POS activation instructions</p>
               <pre className="code-block">{result.posInstructions}</pre>
             </div>
+            <p className="attribution">
+              Apple, the Apple logo, and Apple Wallet are trademarks of Apple Inc., registered in the U.S. and other countries.
+            </p>
           </div>
         ) : null}
       </Modal>
@@ -282,6 +331,9 @@ export function VendorsPage() {
               <p className="muted">POS instructions</p>
               <pre className="code-block">{passView.pass.posInstructions}</pre>
             </div>
+            <p className="attribution">
+              Apple, the Apple logo, and Apple Wallet are trademarks of Apple Inc., registered in the U.S. and other countries.
+            </p>
           </div>
         ) : null}
       </Modal>

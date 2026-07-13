@@ -1,8 +1,9 @@
-import { ScrollView, Text } from 'react-native';
+import { Linking, ScrollView, Text } from 'react-native';
 import { useRouter } from 'expo-router';
-import { AppButton, Banner, Card, Screen, SectionTitle } from '@/components/Ui';
+import { AppButton, AppleTrademark, Banner, BrandHeader, Card, Screen, SectionTitle } from '@/components/Ui';
 import { useAuth } from '@/lib/auth';
 import { useOnboarding } from '@/lib/onboarding';
+import { WEBSITE_URL } from '@/lib/theme';
 
 function selectedSummary(theme?: string, cardName?: string, vendorName?: string) {
   const parts = [theme, cardName, vendorName].filter(Boolean);
@@ -17,6 +18,7 @@ export default function ProfileScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={{ gap: 14, paddingBottom: 24 }}>
+        <BrandHeader subtitle="Your account" />
         <Card>
           <SectionTitle title="Profile" subtitle="Signed-in customer details and app preferences." />
           {auth.profile ? (
@@ -38,6 +40,20 @@ export default function ProfileScreen() {
           <AppButton variant="secondary" onPress={() => router.push('/onboard')}>
             Re-open onboarding
           </AppButton>
+        </Card>
+
+        <Card>
+          <SectionTitle title="About & Legal" subtitle="Website, terms, and privacy." />
+          <AppButton variant="secondary" onPress={() => void Linking.openURL(WEBSITE_URL)}>
+            Visit lightraildeals.com
+          </AppButton>
+          <AppButton variant="secondary" onPress={() => router.push('/legal?doc=terms')}>
+            Terms of Service
+          </AppButton>
+          <AppButton variant="secondary" onPress={() => router.push('/legal?doc=privacy')}>
+            Privacy Policy
+          </AppButton>
+          <AppleTrademark />
         </Card>
 
         <Card>

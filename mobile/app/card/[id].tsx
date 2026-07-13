@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Image, ScrollView, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { AppButton, Banner, Card, FieldInput, Pill, Screen, SectionTitle, Spinner } from '@/components/Ui';
+import { AppButton, AppleTrademark, Banner, Card, FieldInput, Pill, Screen, SectionTitle, Spinner } from '@/components/Ui';
 import { createPass, getCard } from '@/lib/api';
 import { saveStoredPass } from '@/lib/passes';
 import { useAuth } from '@/lib/auth';
@@ -157,6 +157,7 @@ export default function CardDetailScreen() {
           <AppButton variant="secondary" onPress={() => void addToWallet('google')}>
             Add to Google Wallet
           </AppButton>
+          <AppleTrademark />
           {result ? <Banner tone="info">{walletMessage(result.wallet)}</Banner> : null}
           {result ? (
             <>

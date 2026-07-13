@@ -1,5 +1,22 @@
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View, type PressableProps, type TextInputProps, type ViewProps } from 'react-native';
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View, type PressableProps, type TextInputProps, type ViewProps } from 'react-native';
 import type { ReactNode } from 'react';
+import { APPLE_TRADEMARK_NOTICE, theme } from '@/lib/theme';
+
+export function BrandHeader({ subtitle }: { subtitle?: string }) {
+  return (
+    <View style={styles.brandHeader}>
+      <Image source={require('@/assets/images/logo.png')} style={styles.brandLogo} resizeMode="contain" />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.brandTitle}>Light Rail Deals</Text>
+        {subtitle ? <Text style={styles.brandSubtitle}>{subtitle}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
+export function AppleTrademark() {
+  return <Text style={styles.appleTrademark}>{APPLE_TRADEMARK_NOTICE}</Text>;
+}
 
 export function Screen({ children, ...props }: ViewProps) {
   return (
@@ -68,15 +85,42 @@ export function Pill({ children, tone = 'neutral' }: { children: ReactNode; tone
 }
 
 export function Spinner() {
-  return <ActivityIndicator color="#2563eb" />;
+  return <ActivityIndicator color={theme.brand} />;
 }
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#f6f9fc',
+    backgroundColor: theme.bg,
     padding: 16,
     gap: 12,
+  },
+  brandHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 4,
+  },
+  brandLogo: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+  },
+  brandTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: theme.ink,
+    letterSpacing: 0.2,
+  },
+  brandSubtitle: {
+    fontSize: 13,
+    color: theme.muted,
+  },
+  appleTrademark: {
+    fontSize: 11,
+    lineHeight: 15,
+    color: theme.subtle,
   },
   card: {
     backgroundColor: '#ffffff',
@@ -105,13 +149,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  button_primary: { backgroundColor: '#2563eb' },
-  button_secondary: { backgroundColor: '#e5eefb' },
+  button_primary: { backgroundColor: theme.brand },
+  button_secondary: { backgroundColor: theme.brandSoft },
   button_ghost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#c9d5e6' },
-  button_danger: { backgroundColor: '#dc2626' },
+  button_danger: { backgroundColor: theme.danger },
   buttonPressed: { opacity: 0.86 },
   buttonText: { color: '#fff', fontWeight: '700' },
-  buttonTextDark: { color: '#10223d' },
+  buttonTextDark: { color: theme.ink },
   input: {
     backgroundColor: '#fff',
     borderWidth: 1,
