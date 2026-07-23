@@ -207,7 +207,7 @@ function normalizeVendor(input: Record<string, unknown>): VendorListItem {
       label: String(discount.label ?? ''),
     },
     cardId: String(input.cardId ?? ''),
-    walletUrl: String(input.walletUrl ?? ''),
+    walletUrl: input.walletUrl == null ? null : String(input.walletUrl),
   };
 }
 
@@ -248,8 +248,19 @@ export async function getCard(id: string, city?: string) {
   return normalizeCard(card) as CardDetail;
 }
 
-export async function createPass(body: { cardId: string; platform: WalletPlatform }) {
-  return apiRequest<CreatePassResponse>('/passes', { method: 'POST', body: JSON.stringify(body) });
+// Fetches (creating if needed) the current member's single membership pass.
+export async function getMyPass() {
+  return apiRequest<CreatePassResponse>('/me/pass');
+}
+
+// Ensures the member's membership pass exists and returns it. `cardId` is
+// accepted for backwards compatibility but ignored — there is one membership
+// pass per user.
+export async function createPass(body: { cardId?: string; platform?: WalletPlatform } = {}) {
+  return apiRequest<CreatePassResponse>('/me/pass', {
+    method: 'POST',
+    body: JSON.stringify(body.platform ? { platform: body.platform } : {}),
+  });
 }
 
 export async function getPass(serial: string) {

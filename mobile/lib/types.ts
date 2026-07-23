@@ -15,6 +15,21 @@ export interface AuthResponse<TProfile> {
   token: string;
   expiresIn?: string;
   profile: TProfile;
+  membershipPass?: MembershipPass | null;
+  walletUrl?: string | null;
+}
+
+// The user's single all-in-one membership pass. Auto-generated at signup; its
+// barcode (lookupToken) is scanned at any participating business.
+export interface MembershipPass {
+  passId: string;
+  serialNumber: string;
+  lookupToken: string;
+  barcodeValue: string;
+  cardId: string;
+  walletUrl: string | null;
+  androidUrl: string | null;
+  passUrl: string | null;
 }
 
 export interface OnboardingResponse {
@@ -76,7 +91,7 @@ export interface VendorListItem {
   logoUrl: string | null;
   discount: { type: DiscountType; value: number; label: string };
   cardId: string;
-  walletUrl: string;
+  walletUrl: string | null;
 }
 
 export interface WalletPassMetadata {
@@ -103,8 +118,10 @@ export interface GoogleWalletPayload {
 }
 
 export interface CreatePassResponse {
-  pass: WalletPassMetadata;
-  wallet: AppleWalletPayload | GoogleWalletPayload;
+  pass: { passId: string; serialNumber: string; lookupToken: string; barcodeValue: string; cardId: string };
+  walletUrl: string | null;
+  androidUrl: string | null;
+  passUrl: string | null;
   downloadUrl: string;
 }
 

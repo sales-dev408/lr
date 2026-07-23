@@ -23,15 +23,15 @@ export type VendorCategory = 'Sports' | 'Dining' | 'Entertainment';
 export interface CreateVendorResult {
   vendor: { id: string; name: string; address: string | null; category: string; posSystem: string | null };
   discountCode: string;
-  card: { id: string; name: string; reused: boolean; pkpassHostedUrl: string | null; iconUrl: string | null; logoUrl: string | null };
-  wallet: { downloadUrl: string; embedHtml: string };
+  discount: { id: string; type: DiscountType; value: number; label: string };
+  membershipCard: { id: string; name: string };
   posInstructions: string;
 }
 
 export interface VendorPassResult {
-  discountCode: string;
-  card: { id: string; name: string; pkpassHostedUrl: string | null };
-  wallet: { downloadUrl: string; embedHtml: string };
+  discountCode: string | null;
+  discount: { type: DiscountType; value: number; label: string };
+  membershipCard: { id: string; name: string };
   posInstructions: string;
 }
 

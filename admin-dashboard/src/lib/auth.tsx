@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
 import type { AdminProfile, AuthResponse } from './types';
 import { clearStoredAuth, getStoredProfile, getStoredToken, setStoredAuth } from './api';
 
@@ -13,13 +13,8 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(null);
-  const [profile, setProfile] = useState<AdminProfile | null>(null);
-
-  useEffect(() => {
-    setToken(getStoredToken());
-    setProfile(getStoredProfile<AdminProfile>());
-  }, []);
+  const [token, setToken] = useState<string | null>(() => getStoredToken());
+  const [profile, setProfile] = useState<AdminProfile | null>(() => getStoredProfile<AdminProfile>());
 
   const value = useMemo<AuthContextValue>(
     () => ({

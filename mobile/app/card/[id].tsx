@@ -1,25 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Image, ScrollView, Text, View } from 'react-native';
+import { Image, Linking, ScrollView, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { AppButton, AppleTrademark, Banner, Card, FieldInput, Pill, Screen, SectionTitle, Spinner } from '@/components/Ui';
 import { createPass, getCard } from '@/lib/api';
-import { saveStoredPass } from '@/lib/passes';
 import { useAuth } from '@/lib/auth';
 import { useOnboarding } from '@/lib/onboarding';
 import type { CardDetail, WalletPlatform } from '@/lib/types';
 
 function themeLabel(theme: string) {
   return theme.replace('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function walletMessage(wallet: unknown) {
-  if (wallet && typeof wallet === 'object' && 'saveUrl' in wallet && typeof (wallet as { saveUrl?: unknown }).saveUrl === 'string') {
-    return `Google Wallet save link: ${(wallet as { saveUrl: string }).saveUrl}`;
-  }
-  if (wallet && typeof wallet === 'object' && 'passJson' in wallet) {
-    return 'Apple Wallet signing is not configured on this backend. The unsigned pass JSON is shown for demonstration.';
-  }
-  return 'Wallet metadata returned.';
 }
 
 export default function CardDetailScreen() {
@@ -78,16 +67,17 @@ export default function CardDetailScreen() {
     setSaving(platform);
     setError(null);
     try {
-      const response = await createPass({ cardId: params.id, platform });
+      const response = await createPass({ platform });
       setResult(response);
-      await saveStoredPass({
-        ...response.pass,
-        platform,
-        addedAt: new Date().toISOString(),
-        walletMessage: walletMessage(response.wallet),
-        walletUrl: 'saveUrl' in response.wallet ? response.wallet.saveUrl : response.downloadUrl,
-      });
-      router.push(`/pass/${response.pass.serialNumber}`);
+      const url = platform === 'google' ? response.androidUrl ?? response.walletUrl : response.walletUrl ?? response.passUrl;
+      if (url) {
+        try {
+          await Linking.openURL(url);
+        } catch {
+          // fall through to the membership tab
+        }
+      }
+      router.push('/passes');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to add pass');
     } finally {
@@ -151,21 +141,18 @@ export default function CardDetailScreen() {
         ) : null}
 
         <Card>
-          <SectionTitle title="Add to wallet" subtitle="Native pass add is scaffolded; signing and wallet entitlements are not faked." />
+          <SectionTitle title="Your membership pass" subtitle="One all-in-one pass unlocks every participating business." />
           {saving ? <Spinner /> : null}
           <AppButton onPress={() => void addToWallet('apple')}>Add to Apple Wallet</AppButton>
           <AppButton variant="secondary" onPress={() => void addToWallet('google')}>
             Add to Google Wallet
           </AppButton>
           <AppleTrademark />
-          {result ? <Banner tone="info">{walletMessage(result.wallet)}</Banner> : null}
           {result ? (
             <>
+              <Banner tone="info">Your membership pass is ready. Show its barcode at checkout.</Banner>
               <Text selectable style={{ color: '#52617a' }}>
-                Pass serial: {result.pass.serialNumber}
-              </Text>
-              <Text selectable style={{ color: '#52617a' }}>
-                Lookup token: {result.pass.lookupToken}
+                Member barcode: {result.pass.barcodeValue}
               </Text>
             </>
           ) : null}

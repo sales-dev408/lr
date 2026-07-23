@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Image, Linking, RefreshControl, ScrollView, Text, View } from 'react-native';
-import { useFocusEffect } from 'expo-router';
-import { AppButton, AppleTrademark, Banner, BrandHeader, Card, Pill, Screen, SectionTitle, Spinner } from '@/components/Ui';
+import { Image, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { Link, useFocusEffect } from 'expo-router';
+import { AppButton, Banner, BrandHeader, Card, Pill, Screen, SectionTitle, Spinner } from '@/components/Ui';
 import { listVendors } from '@/lib/api';
 import type { VendorListItem } from '@/lib/types';
 
@@ -51,18 +51,6 @@ export default function VendorsScreen() {
     setRefreshing(false);
   }
 
-  async function openWallet(vendor: VendorListItem) {
-    if (!vendor.walletUrl) {
-      setError('This vendor has no Apple Wallet pass yet.');
-      return;
-    }
-    try {
-      await Linking.openURL(vendor.walletUrl);
-    } catch {
-      setError('Unable to open Apple Wallet.');
-    }
-  }
-
   return (
     <Screen>
       <ScrollView
@@ -71,7 +59,11 @@ export default function VendorsScreen() {
       >
         <BrandHeader subtitle="Discounts along the line" />
         <Card>
-          <SectionTitle title="Deals" subtitle="Pick a vendor to add its discount to Apple Wallet." />
+          <SectionTitle title="Participating businesses" subtitle="Your one membership card works at every business below." />
+          <Banner tone="info">
+            Show your membership pass barcode at checkout — the business applies that vendor&apos;s exclusive discount. No
+            separate pass per store.
+          </Banner>
           <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
             {CATEGORIES.map((value) => (
               <AppButton key={value} variant={category === value ? 'primary' : 'secondary'} onPress={() => setCategory(value)}>
@@ -114,11 +106,12 @@ export default function VendorsScreen() {
             <Pill tone="success">{selected.discount.label}</Pill>
             {selected.address ? <Text style={{ color: '#52617a' }}>{selected.address}</Text> : null}
             {selected.posSystem ? <Text style={{ color: '#52617a' }}>POS: {selected.posSystem}</Text> : null}
-            <AppButton onPress={() => void openWallet(selected)}>Add to Apple Wallet</AppButton>
+            <Link href="/passes" asChild>
+              <AppButton>Open my membership pass</AppButton>
+            </Link>
             <Text style={{ color: '#7c8a9d', fontSize: 12 }}>
-              The barcode is shown in Apple Wallet. Present it at checkout for your discount.
+              Show your membership pass barcode here and staff will apply the {selected.discount.label} member discount.
             </Text>
-            <AppleTrademark />
           </Card>
         ) : null}
       </ScrollView>
