@@ -6,13 +6,32 @@ import { authenticate, requireRole } from './lib/auth.ts';
 import { dbQuery, withDbClient } from './lib/db.ts';
 import { getAdminAnalytics } from './lib/analytics.ts';
 import { buildLookupDiscountView } from './lib/discounts.ts';
-import { generateOpaqueToken } from './lib/ids.ts';
 import { resolvePassLookup, resolveCardLookup } from './lib/lookup.ts';
 import { redeemDiscount } from './lib/redeem.ts';
-import { buildApplePassPackage, buildGoogleWalletLink, buildAddpassPayload, buildPkpassDownloadUrl, buildWalletEmbedHtml } from './lib/wallet.ts';
-import { addpassConfigured, streamPkPass } from './lib/addpass.ts';
+import { buildMemberPassUrl } from './lib/wallet.ts';
 import { createVendorWithDiscount } from './lib/vendors.ts';
+import { ensureMembershipPass, membershipWalletUrl } from './lib/membership.ts';
 import { humanDiscountLabel } from './lib/codes.ts';
+
+// Shape the customer-facing membership pass payload (wallet + barcode links),
+// creating the pass idempotently. Returns null if pass generation fails.
+async function buildMembershipPassResponse(userId: string, baseUrl?: string) {
+  try {
+    const pass = await ensureMembershipPass(userId);
+    return {
+      serialNumber: pass.serial_number,
+      lookupToken: pass.lookup_token,
+      barcodeValue: pass.barcode_value ?? pass.lookup_token,
+      cardId: pass.card_id,
+      walletUrl: membershipWalletUrl(pass),
+      androidUrl: pass.passcreator_android_uri ?? null,
+      passUrl: baseUrl ? buildMemberPassUrl(baseUrl, pass.serial_number) : null,
+      passcreatorId: pass.passcreator_id ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 const customerRegisterSchema = z.object({
   email: z.string().email().optional(),
@@ -326,7 +345,9 @@ Deno.serve(async (request) => {
       });
       const profile = await buildCustomerProfile(rows[0]!.id);
       const token = await issueToken('customer', rows[0]!.id, profile?.email ?? body.email ?? null);
-      return json(request, { token, expiresIn: '7d', profile }, { status: 201 });
+      // Auto-generate the member's all-in-one membership pass right after signup.
+      const membershipPass = await buildMembershipPassResponse(rows[0]!.id, baseUrl);
+      return json(request, { token, expiresIn: '7d', profile, membershipPass, walletUrl: membershipPass?.walletUrl ?? null }, { status: 201 });
     }
 
     if (path === '/api/auth/login' && request.method === 'POST') {
@@ -341,7 +362,8 @@ Deno.serve(async (request) => {
       }
       const profile = await buildCustomerProfile(user.id);
       const token = await issueToken('customer', user.id, user.email);
-      return json(request, { token, expiresIn: '7d', profile });
+      const membershipPass = await buildMembershipPassResponse(user.id, baseUrl);
+      return json(request, { token, expiresIn: '7d', profile, membershipPass, walletUrl: membershipPass?.walletUrl ?? null });
     }
 
     if (path === '/api/auth/social' && request.method === 'POST') {
@@ -372,7 +394,8 @@ Deno.serve(async (request) => {
       });
       const token = await issueToken('customer', rows.id, rows.email);
       const profile = await buildCustomerProfile(rows.id);
-      return json(request, { token, expiresIn: '7d', profile });
+      const membershipPass = await buildMembershipPassResponse(rows.id, baseUrl);
+      return json(request, { token, expiresIn: '7d', profile, membershipPass, walletUrl: membershipPass?.walletUrl ?? null });
     }
 
     if (path === '/api/auth/admin/login' && request.method === 'POST') {
@@ -398,9 +421,10 @@ Deno.serve(async (request) => {
       return json(request, { ...(cards[0] as Record<string, unknown>), participatingBusinesses: vendors });
     }
 
-    // Public, customer-facing vendor directory for the mobile app. The raw
-    // discount code is intentionally NOT included — customers only ever see the
-    // barcode inside the Apple Wallet pass they add via `walletUrl`.
+    // Public, customer-facing directory of participating businesses for the
+    // mobile app. Every vendor's exclusive discount hangs off the single
+    // membership card; the member unlocks them all with their own membership
+    // pass, so no per-vendor wallet URL or raw discount code is exposed here.
     if ((path === '/api/vendors' || /^\/api\/vendors\/[^/]+$/.test(path)) && request.method === 'GET') {
       const single = path !== '/api/vendors';
       const vendorId = single ? path.split('/').pop()! : null;
@@ -420,10 +444,10 @@ Deno.serve(async (request) => {
         card_logo: string | null;
       }>(
         `SELECT v.id, v.name, v.address, v.location, v.category, v.pos_system, v.icon_url, v.logo_url,
-                c.id AS card_id, c.discount_type, c.discount_value, c.icon_url AS card_icon, c.logo_url AS card_logo
+                c.id AS card_id, d.type AS discount_type, d.value AS discount_value, c.icon_url AS card_icon, c.logo_url AS card_logo
          FROM vendors v
-         JOIN card_vendors cv ON cv.vendor_id = v.id
-         JOIN cards c ON c.id = cv.card_id AND c.status = 'active' AND c.discount_code IS NOT NULL
+         JOIN cards c ON c.is_membership = true AND c.status = 'active'
+         JOIN discounts d ON d.vendor_id = v.id AND d.card_id = c.id AND d.active = true
          WHERE v.status = 'approved' AND ($1::uuid IS NULL OR v.id = $1::uuid)
          ORDER BY v.name`,
         [vendorId],
@@ -442,7 +466,7 @@ Deno.serve(async (request) => {
           label: humanDiscountLabel(row.discount_type, Number(row.discount_value)),
         },
         cardId: row.card_id,
-        walletUrl: buildPkpassDownloadUrl(baseUrl, row.card_id),
+        walletUrl: null,
       }));
       if (single) {
         if (items.length === 0) return json(request, { error: 'Vendor not found' }, { status: 404 });
@@ -503,19 +527,16 @@ Deno.serve(async (request) => {
       const auth = requireRole(request, ['admin']);
       if (auth instanceof Response) return auth;
       const body = adminVendorCreateSchema.parse(await readJsonBody(request, {}));
-      const result = await createVendorWithDiscount(
-        {
-          name: body.name,
-          address: body.address ?? null,
-          category: body.category,
-          posSystem: body.posSystem ?? null,
-          discountType: body.discountType,
-          discountValue: body.discountValue,
-          iconDataUrl: body.iconDataUrl ?? null,
-          logoDataUrl: body.logoDataUrl ?? null,
-        },
-        baseUrl,
-      );
+      const result = await createVendorWithDiscount({
+        name: body.name,
+        address: body.address ?? null,
+        category: body.category,
+        posSystem: body.posSystem ?? null,
+        discountType: body.discountType,
+        discountValue: body.discountValue,
+        iconDataUrl: body.iconDataUrl ?? null,
+        logoDataUrl: body.logoDataUrl ?? null,
+      });
       return json(request, result, { status: 201 });
     }
     if (/^\/api\/admin\/vendors\/[^/]+$/.test(path) && request.method === 'PATCH') {
@@ -529,24 +550,29 @@ Deno.serve(async (request) => {
       );
       return json(request, rows[0] ?? {});
     }
+    // Returns a vendor's exclusive discount on the shared membership card. There
+    // is no per-vendor wallet pass anymore — members carry one membership pass,
+    // and the business applies this discount when they scan the member barcode.
     if (/^\/api\/admin\/vendors\/[^/]+\/pass$/.test(path) && request.method === 'GET') {
       const auth = requireRole(request, ['admin']);
       if (auth instanceof Response) return auth;
       const id = path.split('/').slice(-2)[0]!;
-      const rows = await dbQuery<{ card_id: string; card_name: string; discount_type: string; discount_value: string; discount_code: string; pkpass_url: string | null; pos_system: string | null }>(
-        `SELECT c.id AS card_id, c.name AS card_name, c.discount_type, c.discount_value, c.discount_code, c.pkpass_url, v.pos_system
-         FROM card_vendors cv JOIN cards c ON c.id = cv.card_id JOIN vendors v ON v.id = cv.vendor_id
-         WHERE cv.vendor_id = $1 AND c.discount_code IS NOT NULL ORDER BY c.created_at DESC LIMIT 1`,
+      const rows = await dbQuery<{ card_id: string; card_name: string; discount_type: 'fixed' | 'percent' | 'bogo'; discount_value: string; discount_code: string | null; pos_system: string | null }>(
+        `SELECT c.id AS card_id, c.name AS card_name, d.type AS discount_type, d.value AS discount_value, d.discount_code, v.pos_system
+         FROM discounts d
+         JOIN cards c ON c.id = d.card_id AND c.is_membership = true
+         JOIN vendors v ON v.id = d.vendor_id
+         WHERE d.vendor_id = $1 ORDER BY d.created_at DESC LIMIT 1`,
         [id],
       );
       const row = rows[0];
-      if (!row) return json(request, { error: 'No discount pass for this vendor' }, { status: 404 });
-      const downloadUrl = buildPkpassDownloadUrl(baseUrl, row.card_id);
+      if (!row) return json(request, { error: 'No discount for this vendor' }, { status: 404 });
+      const label = humanDiscountLabel(row.discount_type, Number(row.discount_value));
       return json(request, {
         discountCode: row.discount_code,
-        card: { id: row.card_id, name: row.card_name, pkpassHostedUrl: row.pkpass_url },
-        wallet: { downloadUrl, embedHtml: buildWalletEmbedHtml(downloadUrl, row.card_name) },
-        posInstructions: `Scan the barcode or manually enter code ${row.discount_code} in your POS${row.pos_system ? ` (${row.pos_system})` : ''}. No NFC required.`,
+        discount: { type: row.discount_type, value: Number(row.discount_value), label },
+        membershipCard: { id: row.card_id, name: row.card_name },
+        posInstructions: `Ask the customer to show their ${row.card_name} pass, scan its barcode, then apply code ${row.discount_code ?? '(none)'} in your POS${row.pos_system ? ` (${row.pos_system})` : ''}. No NFC required.`,
       });
     }
     if (/^\/api\/admin\/vendors\/[^/]+\/approve$/.test(path) && request.method === 'POST') {
@@ -640,45 +666,55 @@ Deno.serve(async (request) => {
       return json(request, await dbQuery('DELETE FROM discounts WHERE id = $1 RETURNING id', [id]));
     }
 
-    // Streams the .pkpass for a discount tier so the mobile app / website can
-    // offer a stable "Add to Apple Wallet" link. The barcode inside always
-    // encodes the tier's discount code (never shown to the customer directly).
-    if (/^\/api\/passes\/card\/[^/]+\/pkpass$/.test(path) && request.method === 'GET') {
-      const cardId = path.split('/').slice(-2)[0]!;
-      const rows = await dbQuery<{ id: string; name: string; discount_type: 'fixed' | 'percent' | 'bogo'; discount_value: string; discount_code: string; icon_url: string | null; logo_url: string | null }>(
-        `SELECT id, name, discount_type, discount_value, discount_code, icon_url, logo_url FROM cards WHERE id = $1 AND discount_code IS NOT NULL LIMIT 1`,
-        [cardId],
+    // Resolves a membership pass to its wallet download. 302-redirects to the
+    // Passcreator-hosted pass (Apple Wallet / Google Wallet) so the link stays
+    // valid even if the underlying hosted URL changes.
+    if (/^\/api\/passes\/[^/]+\/pkpass$/.test(path) && request.method === 'GET') {
+      const serial = path.split('/').slice(-2)[0]!;
+      const rows = await dbQuery<{ user_id: string; passcreator_iphone_uri: string | null; passcreator_url: string | null }>(
+        `SELECT user_id, passcreator_iphone_uri, passcreator_url FROM passes WHERE serial_number = $1 LIMIT 1`,
+        [serial],
       );
-      const card = rows[0];
-      if (!card) return json(request, { error: 'Pass not found' }, { status: 404 });
-      if (!addpassConfigured()) return json(request, { error: 'Apple Wallet pass generation is not configured' }, { status: 503 });
-      const bytes = await streamPkPass(
-        buildAddpassPayload({ id: card.id, name: card.name, discountType: card.discount_type, discountValue: Number(card.discount_value), discountCode: card.discount_code, iconUrl: card.icon_url, logoUrl: card.logo_url }),
-      );
-      return new Response(bytes, {
-        headers: {
-          'Content-Type': 'application/vnd.apple.pkpass',
-          'Content-Disposition': `attachment; filename="${card.discount_code}.pkpass"`,
-          'Access-Control-Allow-Origin': corsOrigin(request),
-        },
+      const row = rows[0];
+      if (!row) return json(request, { error: 'Pass not found' }, { status: 404 });
+      let target = row.passcreator_iphone_uri || row.passcreator_url;
+      if (!target) {
+        const pass = await ensureMembershipPass(row.user_id);
+        target = membershipWalletUrl(pass);
+      }
+      if (!target) return json(request, { error: 'Apple Wallet pass generation is not configured' }, { status: 503 });
+      return new Response(null, { status: 302, headers: { Location: target, 'Access-Control-Allow-Origin': corsOrigin(request) } });
+    }
+
+    // The current member's single all-in-one membership pass (auto-created).
+    if (path === '/api/me/pass' && (request.method === 'GET' || request.method === 'POST')) {
+      const auth = requireRole(request, ['customer']);
+      if (auth instanceof Response) return auth;
+      const body = request.method === 'POST' ? z.object({ platform: z.enum(['apple', 'google']).optional() }).parse(await readJsonBody(request, {})) : {};
+      const pass = await ensureMembershipPass(auth.sub, body.platform ? { platform: body.platform } : {});
+      return json(request, {
+        pass: { passId: pass.id, serialNumber: pass.serial_number, lookupToken: pass.lookup_token, barcodeValue: pass.barcode_value ?? pass.lookup_token, cardId: pass.card_id },
+        walletUrl: membershipWalletUrl(pass),
+        androidUrl: pass.passcreator_android_uri ?? null,
+        passUrl: buildMemberPassUrl(baseUrl, pass.serial_number),
+        downloadUrl: `/api/passes/${pass.serial_number}`,
       });
     }
 
+    // Backwards-compatible create endpoint: always returns the member's single
+    // membership pass (idempotent). Any supplied cardId is ignored.
     if (path === '/api/passes' && request.method === 'POST') {
       const auth = requireRole(request, ['customer']);
       if (auth instanceof Response) return auth;
-      const body = z.object({ cardId: z.string().uuid(), platform: z.enum(['apple', 'google']) }).parse(await readJsonBody(request, {}));
-      const serialNumber = generateOpaqueToken(12);
-      const lookupToken = generateOpaqueToken(18);
-      const authToken = generateOpaqueToken(18);
-      const rows = await dbQuery<{ id: string; serial_number: string }>(
-        `INSERT INTO passes (user_id, card_id, platform, serial_number, auth_token, lookup_token) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, serial_number`,
-        [auth.sub, body.cardId, body.platform, serialNumber, authToken, lookupToken],
-      );
-      const card = await dbQuery<{ name: string; description: string | null }>('SELECT name, description FROM cards WHERE id = $1 LIMIT 1', [body.cardId]);
-      const passMetadata = { passId: rows[0]!.id, serialNumber, lookupToken, authToken, cardName: card[0]?.name ?? 'Master Card', description: card[0]?.description ?? null };
-      const wallet = body.platform === 'apple' ? buildApplePassPackage(passMetadata) : buildGoogleWalletLink({ passId: passMetadata.passId, serialNumber: passMetadata.serialNumber, lookupToken: passMetadata.lookupToken, cardName: passMetadata.cardName });
-      return json(request, { pass: passMetadata, wallet, downloadUrl: `/api/passes/${rows[0]!.serial_number}` }, { status: 201 });
+      const body = z.object({ platform: z.enum(['apple', 'google']).optional(), cardId: z.string().uuid().optional() }).parse(await readJsonBody(request, {}));
+      const pass = await ensureMembershipPass(auth.sub, body.platform ? { platform: body.platform } : {});
+      return json(request, {
+        pass: { passId: pass.id, serialNumber: pass.serial_number, lookupToken: pass.lookup_token, barcodeValue: pass.barcode_value ?? pass.lookup_token, cardId: pass.card_id },
+        walletUrl: membershipWalletUrl(pass),
+        androidUrl: pass.passcreator_android_uri ?? null,
+        passUrl: buildMemberPassUrl(baseUrl, pass.serial_number),
+        downloadUrl: `/api/passes/${pass.serial_number}`,
+      }, { status: 201 });
     }
     if (/^\/api\/passes\/[^/]+$/.test(path) && request.method === 'GET') {
       const serial = path.split('/').pop()!;

@@ -65,6 +65,15 @@ Edge function (set with `supabase secrets set`):
 - `VENDOR_PORTAL_URL`
 - `ALLOWED_ORIGINS` — comma-separated list of the Cloudflare frontend origins
 - POS/Square/Apple/Google provider keys as needed (same names as `backend/`)
+- `PASSCREATOR_API_KEY` — Passcreator API key used to create wallet passes. Sent
+  verbatim in the `Authorization` header (no `Bearer` prefix).
+- `PASSCREATOR_TEMPLATE_ID` — id of the Passcreator template for the all-in-one
+  membership pass. (`PASSCREATOR_TEMPLATEID` is accepted as an alias.)
+- `PASSCREATOR_BASE_URL` (optional, defaults `https://app.passcreator.com/api/v3`)
+
+If `PASSCREATOR_API_KEY` and `PASSCREATOR_TEMPLATE_ID` are not both set, the app
+still works but membership passes are created without a hosted wallet URL and
+`walletUrl` comes back `null`.
 
 Note: the function talks to Postgres directly over the connection string, so the
 REST `SUPABASE_URL` / anon / service-role keys are not required by the router
@@ -78,8 +87,11 @@ supabase link --project-ref <project-ref>
 # schema (or paste the two SQL migrations into the SQL editor)
 psql "$SUPABASE_DB_URL" -f backend/src/db/migrations/001_init.sql
 psql "$SUPABASE_DB_URL" -f backend/src/db/migrations/002_pos_integration.sql
+psql "$SUPABASE_DB_URL" -f backend/src/db/migrations/003_discount_workflow.sql
+psql "$SUPABASE_DB_URL" -f backend/src/db/migrations/004_membership_card.sql
 # function
-supabase secrets set SUPABASE_DB_URL=... JWT_SECRET=... POS_TOKEN_ENC_KEY=... ALLOWED_ORIGINS=...
+supabase secrets set SUPABASE_DB_URL=... JWT_SECRET=... POS_TOKEN_ENC_KEY=... ALLOWED_ORIGINS=... \
+  PASSCREATOR_API_KEY=... PASSCREATOR_TEMPLATE_ID=...
 supabase functions deploy router
 ```
 

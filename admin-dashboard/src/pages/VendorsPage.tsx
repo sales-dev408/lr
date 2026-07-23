@@ -271,7 +271,7 @@ export function VendorsPage() {
                     Edit
                   </Button>
                   <Button variant="secondary" onClick={() => handleViewPass(vendor)}>
-                    View pass
+                    View discount
                   </Button>
                 </div>
               </article>
@@ -283,57 +283,46 @@ export function VendorsPage() {
       <Modal open={Boolean(result)} title="Vendor created" onClose={() => setResult(null)}>
         {result ? (
           <div className="stack">
-            {result.card.reused ? (
-              <SuccessBanner message={`Reused the existing "${result.card.name}" pass for this discount tier.`} />
-            ) : (
-              <SuccessBanner message={`New "${result.card.name}" discount pass generated.`} />
-            )}
+            <SuccessBanner message={`"${result.vendor.name}" added to the ${result.membershipCard.name} with a ${result.discount.label} member discount.`} />
             <div>
-              <p className="muted">Discount code (barcode + visible on pass)</p>
+              <p className="muted">Exclusive member discount</p>
+              <pre className="code-block">{result.discount.label}</pre>
+            </div>
+            <div>
+              <p className="muted">POS discount code</p>
               <pre className="code-block">{result.discountCode}</pre>
-            </div>
-            <div>
-              <p className="muted">Add to Apple Wallet</p>
-              <a className="btn btn-primary" href={result.wallet.downloadUrl} target="_blank" rel="noreferrer">
-                 Add to Apple Wallet
-              </a>
-            </div>
-            <div>
-              <p className="muted">Website embed code</p>
-              <pre className="code-block">{result.wallet.embedHtml}</pre>
             </div>
             <div>
               <p className="muted">Merchant POS activation instructions</p>
               <pre className="code-block">{result.posInstructions}</pre>
             </div>
-            <p className="attribution">
-              Apple, the Apple logo, and Apple Wallet are trademarks of Apple Inc., registered in the U.S. and other countries.
+            <p className="muted">
+              Members carry one all-in-one membership pass. This vendor&apos;s discount is applied when their membership
+              barcode is scanned at checkout — no per-vendor pass is generated.
             </p>
           </div>
         ) : null}
       </Modal>
 
-      <Modal open={Boolean(passView)} title={`Pass: ${passView?.vendor.name ?? ''}`} onClose={() => setPassView(null)}>
+      <Modal open={Boolean(passView)} title={`Discount: ${passView?.vendor.name ?? ''}`} onClose={() => setPassView(null)}>
         {passView ? (
           <div className="stack">
             <div>
-              <p className="muted">Discount code</p>
-              <pre className="code-block">{passView.pass.discountCode}</pre>
+              <p className="muted">Exclusive member discount</p>
+              <pre className="code-block">{passView.pass.discount.label}</pre>
             </div>
-            <a className="btn btn-primary" href={passView.pass.wallet.downloadUrl} target="_blank" rel="noreferrer">
-               Add to Apple Wallet
-            </a>
             <div>
-              <p className="muted">Website embed code</p>
-              <pre className="code-block">{passView.pass.wallet.embedHtml}</pre>
+              <p className="muted">POS discount code</p>
+              <pre className="code-block">{passView.pass.discountCode ?? '—'}</pre>
+            </div>
+            <div>
+              <p className="muted">Membership card</p>
+              <pre className="code-block">{passView.pass.membershipCard.name}</pre>
             </div>
             <div>
               <p className="muted">POS instructions</p>
               <pre className="code-block">{passView.pass.posInstructions}</pre>
             </div>
-            <p className="attribution">
-              Apple, the Apple logo, and Apple Wallet are trademarks of Apple Inc., registered in the U.S. and other countries.
-            </p>
           </div>
         ) : null}
       </Modal>
